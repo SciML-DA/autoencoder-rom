@@ -36,14 +36,30 @@ case "${1:-}" in
     rsync -rvlt -hP "${REMOTE}:${REMOTE_ROOT}/results/" "${LOCAL_ROOT}/results/"
     ;;
   data)
-    # --append-verify makes an interrupted 34 GB upload resumable
-    rsync -rvlt -hP --append-verify "${LOCAL_ROOT}/data/" "${REMOTE}:${REMOTE_DATA}/"
+    # macOS ships openrsync (2.6.9-compatible), which has --append but NOT
+    # --append-verify, and exits 0 after printing usage when handed an unknown
+    # flag -- a silent no-op. Probe instead of assuming, and checksum after,
+    # since plain --append trusts that the remote prefix matches.
+    if rsync --help 2>&1 | grep -q -- '--append-verify'; then
+        RESUME=(--append-verify)
+    else
+        RESUME=(--append --partial)
+    fi
+    rsync -rvlt -hP "${RESUME[@]}" "${LOCAL_ROOT}/data/" "${REMOTE}:${REMOTE_DATA}/"
+    ;;
+  verify)
+    # confirms an --append resume did not splice mismatched halves together
+    for f in "${@:2}"; do
+        l=$(md5 -q "${LOCAL_ROOT}/data/$f" 2>/dev/null || md5sum "${LOCAL_ROOT}/data/$f" | cut -d' ' -f1)
+        r=$(ssh "${REMOTE}" "md5sum '${REMOTE_DATA}/$f' | cut -d' ' -f1")
+        [ "$l" = "$r" ] && echo "OK   $f" || echo "DIFF $f  local=$l remote=$r"
+    done
     ;;
   quota)
     ssh "${REMOTE}" 'du -sh $HOME 2>/dev/null; quota -s 2>/dev/null | tail -3'
     ;;
   *)
-    echo "usage: $0 {push|pull|data|quota}" >&2
+    echo "usage: $0 {push|pull|data|verify <file>...|quota}" >&2
     exit 1
     ;;
 esac
