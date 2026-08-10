@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REMOTE="aero"
-REMOTE_ROOT="/home/ljc124/real-time-da"
+REMOTE_ROOT="/home/ljc124/autoencoder-rom"
 REMOTE_DATA="/home/ljc124/data"
 LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

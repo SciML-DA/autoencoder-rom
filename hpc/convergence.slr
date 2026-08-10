@@ -9,7 +9,9 @@
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
-# --account=?  GPU partition is restricted; fill in from `sacctmgr show association user=ljc124`
+# the gpu partition is restricted: aero_general (the default) cannot reach it,
+# so this must name the research account explicitly
+#SBATCH --account=aero_research_novoa
 
 set -euo pipefail
 

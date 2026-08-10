@@ -52,7 +52,15 @@ dependencies = [
     "ipywidgets>=8.1",
     "jupyter>=1.1",
     "torch>=2.2.2",
-    "jax>=0.11.0",
+    # torch's linux wheel bundles CUDA, jax's does not -- plain `jax` is the
+    # CPU build, and it falls back silently, so AEJax/CAEJax would time a CPU
+    # against torch's GPU inside the same job. no CUDA wheels exist for macOS,
+    # hence the split rather than one line.
+    # the py<3.13 branch above pins torch 2.2, which needs cudnn 8.9, while
+    # jax[cuda12] needs cudnn >=9.8 -- so the CUDA build is gated to 3.13+ too.
+    # that branch is unreachable in practice (the venv is 3.13, torch 2.9).
+    "jax[cuda12]>=0.11.0; sys_platform == 'linux' and python_version >= '3.13'",
+    "jax>=0.11.0; sys_platform != 'linux' or python_version < '3.13'",
 ]
 
 [project.optional-dependencies]
