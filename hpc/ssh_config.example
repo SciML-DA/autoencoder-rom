@@ -1,0 +1,30 @@
+# Append to ~/.ssh/config, then: mkdir -p ~/.ssh/cm && chmod 700 ~/.ssh/cm
+# ControlMaster keeps one authenticated connection alive so rsync/git/scp don't
+# each prompt separately. Aero may also accept SSH keys (try `ssh-copy-id aero`);
+# the central RCS login nodes do not.
+
+Host aero
+    HostName spitfire.ae.ic.ac.uk
+    User ljc124
+    ControlMaster auto
+    ControlPath ~/.ssh/cm/%r@%h:%p
+    ControlPersist 8h
+    ServerAliveInterval 60
+    ServerAliveCountMax 5
+
+# Fallbacks — same home directory, same cluster, use if spitfire is loaded
+Host hurricane typhoon
+    HostName %h.ae.ic.ac.uk
+    User ljc124
+    ControlMaster auto
+    ControlPath ~/.ssh/cm/%r@%h:%p
+    ControlPersist 8h
+
+# Central RCS HPC. Separate system, separate home directory, PBS not Slurm.
+Host cx3
+    HostName login.cx3.hpc.imperial.ac.uk
+    User ljc124
+    ControlMaster auto
+    ControlPath ~/.ssh/cm/%r@%h:%p
+    ControlPersist 8h
+    CheckHostIP no

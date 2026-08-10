@@ -1,0 +1,20 @@
+#!/bin/bash
+#PBS -N convergence
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=08:00:00
+
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+export MPLBACKEND=Agg
+
+cd "$PBS_O_WORKDIR"
+
+# Stage the 34 GB training file onto node-local disk. Reading it repeatedly
+# straight off the RDS is the usual reason these jobs crawl.
+cp "$EPHEMERAL/data/Challenge1.1_train.h5" "$TMPDIR/"
+export DATA_ROOT="$TMPDIR"
+
+# convergence_study.py writes to `results/convergence` relative to cwd, which is
+# $PBS_O_WORKDIR — already permanent storage, so nothing to copy back.
+uv run python scripts/convergence_study.py

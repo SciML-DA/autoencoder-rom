@@ -1,0 +1,24 @@
+# env's 
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# data 
+data/
+
+# plots are regenerable, so only the csv is saved
+# git cannot re-include a file whose parent dir is excluded, so `results/**`
+# plus a directory re-include 
+results/**
+!results/**/
+!results/**/results.csv
+wandb/
+*.o[0-9]*
+*.e[0-9]*
+
+.DS_Store
+.vscode/
+.ruff_cache/
+

@@ -1,0 +1,1107 @@
+"""
+autoencoders.py
+===============
+
+Dimensionality-reduction building blocks for data-driven ROMs.
+Only 2D snapshot data is supported for now, but the API is designed to be extensible to 3D and multi-field data in the future.
+
+All projectors — linear or nonlinear — share the same sklearn-style API:
+
+    p.fit(X)         -- learn the representation from data  X (N_x, N_t)
+    p.encode(X)      -- X (N_x, N_t) --> Z (N_latent, N_t)
+    p.decode(Z)      -- Z (N_latent, N_t) --> X_hat (N_x, N_t)
+    p.reconstruct(X) -- full round-trip
+    p.score(X)       -- mean squared reconstruction error
+    p.N_latent       -- size of the latent (bottleneck) space
+
+Class hierarchy
+---------------
+
+    Projector (ABC)               shared interface + N_latent + reconstruct/score/copy
+    ├── POD(Projector)            Proper Orthogonal Decomposition (linear)
+    │     N_latent == N_modes retained
+    │     Sigma, Psi, Phi         decomposition results
+    │     truncate / restore_shape / plot_spectrum / ...  utilities
+    │
+    ├── SPOD(POD)                 Spectral POD (Sieber et al. JFM 2016)
+    │     inherits all POD helpers; only _decompose is overridden
+    │     to apply the Toeplitz low-pass filter before the eigensolve
+    │
+    ├── AE(Projector)             Fully-connected Autoencoder (MLP, PyTorch)
+    │     encoder/decoder, loss_history, _scale   trained end-to-end on MSE
+    │
+    └── CAE(Projector)            Convolutional Autoencoder (PyTorch)
+          Conv2d encoder / ConvTranspose2d decoder + dense bottleneck
+
+These are pure dimensionality-reduction tools — they have no temporal
+forecaster.  Combine with an ESN or LSTM in models/data_driven/ to build
+a complete ROM.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+import numpy as np
+
+from copy import deepcopy
+from typing import Optional
+import torch
+import torch.nn as nn
+
+from .pod_spod import snapshot_pod, snapshot_pod_randomized, spod_sieber
+
+__all__ = ["Projector", "AE", "CAE", "POD", "SPOD"]
+
+
+class Projector(ABC):
+    """
+    Abstract base for all dimensionality-reduction building blocks,
+    both linear (POD, SPOD) and nonlinear (AE, CAE).
+
+    Every projector exposes:
+
+        N_latent  -- size of the latent / bottleneck space. In POD/SPOD, this is the number of modes retained.
+        fit       -- learn the representation from data
+        encode    -- map state space X --> latent Z
+        decode    -- map latent Z --> reconstructed state X_hat
+        reconstruct, score, copy -- provided as concrete methods
+    """
+
+    N_latent: int = 20
+    fitted: bool = False
+    _Q_mean: Optional[np.ndarray] = None
+
+    @property
+    def Q_mean(self) -> np.ndarray:
+        if self._Q_mean is None:
+            raise AttributeError("Not fitted — call fit() first.")
+        return self._Q_mean
+
+    @Q_mean.setter
+    def Q_mean(self, value: np.ndarray) -> None:
+        self._Q_mean = value
+
+    @abstractmethod
+    def fit(self, X: np.ndarray) -> Projector:
+        """Learn the projection from data X (N_x, N_t). Returns self."""
+
+    @abstractmethod
+    def encode(self, X: np.ndarray) -> np.ndarray:
+        """Map X (N_x, N_t) to latent representation Z (N_latent, N_t)."""
+
+    @abstractmethod
+    def decode(self, Z: np.ndarray) -> np.ndarray:
+        """Map latent Z (N_latent, N_t) back to state space Q_hat (N_x, N_t)."""
+
+    def reconstruct(self, X: np.ndarray) -> np.ndarray:
+        """Full round-trip: encode then decode."""
+        return self.decode(self.encode(X))
+
+    def score(self, X: np.ndarray) -> float:
+        """Mean squared reconstruction error ||X - reconstruct(X)||^2 / N."""
+        return float(np.mean((X - self.reconstruct(X)) ** 2))
+
+    # -------
+    # utilities for grid handling
+    # -------
+
+    def _to_physical_grid(self, X_hat: np.ndarray) -> np.ndarray:
+        """Map flat (N_fluid*Nu, N_t) back to (Nu, N_t, Nx, Ny) - exact inverse of _to_flat."""
+        Nu, Nx, Ny = self.grid_shape
+        if X_hat.ndim == 1:
+            X_hat = X_hat[:, np.newaxis]
+        Nt = X_hat.shape[1]
+        N_fluid = int(self.fluid_mask_flat.sum())
+
+        out = np.full((Nu, Nt, Nx, Ny), np.nan)
+
+        # Inverse the flatten: (N_fluid*Nu, Nt) → (N_fluid, Nu, Nt) → (Nu, Nt, N_fluid)
+        X_unflatten = X_hat.reshape(N_fluid, Nu, Nt).transpose(
+            1, 2, 0
+        )  # (Nu, Nt, N_fluid)
+
+        for u in range(Nu):
+            # X_unflatten[u] is (Nt, N_fluid) — all time steps for field u
+            grid_flat = np.full((Nt, Nx * Ny), np.nan)
+            grid_flat[:, self.fluid_mask_flat] = X_unflatten[
+                u
+            ]  # Place fluid values back
+
+            # Reshape (Nt, Nx*Ny) → (Nt, Nx, Ny) and assign
+            out[u] = grid_flat.reshape(Nt, Nx, Ny)
+
+        return out[:, 0] if Nt == 1 else out
+
+    def _to_flat(self, X: np.ndarray) -> np.ndarray:
+        """Map raw grid input (Nu, Nt, Nx, Ny) to flat (N_fluid * n_fields, N_t."""
+        X_masked = X.reshape(X.shape[0], X.shape[1], -1)[
+            :, :, self.fluid_mask_flat
+        ]  # (Nu, Nt, N_fluid)
+
+        return X_masked.transpose(2, 0, 1).reshape(
+            -1, X.shape[1]
+        )  # (N_fluid * n_fields, N_t)
+
+    # -----
+    # preprocessing for raw grid input.
+    # Note: could implement different ones including normalization/standardization.
+    # -----
+
+    def preprocess_snapshot(self, X: np.ndarray, subtract_mean=True):
+        """
+        Build the zero-mean data matrix Q from raw snapshot fields,
+        automatically detecting and removing NaN-masked solid-body points.
+
+        Parameters
+        ----------
+        X : ndarray
+            Raw snapshot data, either as a single field (N_t, Nx, Ny) or a list of fields (Nu, N_t, Nx, Ny).
+
+        subtract_mean : bool
+            If True (default), subtract the temporal mean row-wise.
+
+        Returns
+        -------
+        Q          : ndarray (N_fluid * n_fields, N_t)   zero-mean data matrix for decomposition
+        """
+
+        if not self.fitted:
+            # if the input is raw grid data, we need to detect the fluid points and flatten the data
+            assert (
+                X.ndim == 4
+            ), f"Expected raw grid input with 4 dimensions, got {X.ndim}."
+            Nu, Nt, Nx, Ny = X.shape
+            self.grid_shape = (Nu, Nx, Ny)
+
+            ref = X[0]
+            fluid_mask = ~np.isnan(ref[0])
+            self.fluid_mask_flat = fluid_mask.ravel()
+
+            X_masked_flat = self._to_flat(X)  # (N_fluid * n_fields, N_t)
+
+            if subtract_mean:
+                self.Q_mean = X_masked_flat.mean(axis=1, keepdims=True)
+            else:
+                self.Q_mean = np.zeros_like(X_masked_flat[:, :1])
+
+            Q = X_masked_flat - self.Q_mean  # shape (N_fluid * n_fields, N_t)
+            # store the total kinetic energy for later use in relative error metrics
+            self._TKE = 0.5 * float(np.sum(np.mean(Q**2, axis=1)))
+            return Q
+
+        elif X.shape[0] != self.Q_mean.shape[0]:
+
+            # if the decomosition is already fitted, can expect 1 snapshot only
+            assert X.ndim in (
+                3,
+                4,
+            ), f"Expected flat input with 2, 3 or 4 dimensions, got {X.ndim}."
+            if X.ndim == 3:
+                X = X[:, np.newaxis]  # (n_fields, 1, Nx, Ny)
+
+            # check grid
+            Nu, _, Nx, Ny = X.shape
+            grid_shape = (Nu, Nx, Ny)
+            assert (
+                grid_shape == self.grid_shape
+            ), f"Expected grid shape {self.grid_shape}, got {grid_shape}."
+
+            X_masked_flat = self._to_flat(X)  # (N_fluid * n_fields, N_t)
+            return X_masked_flat - self.Q_mean  # shape (N_fluid * n_fields, N_t)
+        else:
+            # already flat input, just check dimensions and remove mean
+            assert X.ndim == 2, f"Expected flat input with 2 dimensions, got {X.ndim}."
+
+            return X - self.Q_mean  # shape (N_fluid * n_fields, N_t)
+
+    def _field_scale(self, Q: np.ndarray) -> np.ndarray:
+        """
+        Per-field standardization scale for the autoencoders.
+
+        Returns a column vector (N_x, 1) holding the std of each field (U, V,
+        W, ...) broadcast over its rows, so encode/decode standardize each
+        field by its own std
+        """
+        Nu = self.grid_shape[0]
+        scale = np.ones((Q.shape[0], 1), dtype=Q.dtype)
+        for u in range(Nu):
+            s = float(Q[u::Nu].std())
+            scale[u::Nu, 0] = s if s > 0 else 1.0
+        return scale
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Nonlinear Autoencoders -- UROP project
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class AE(Projector):
+    """
+    Fully-connected Autoencoder (MLP).
+
+    Nonlinear generalisation of POD. Encoder MLP maps the flattened,
+    zero-mean state to a bottleneck of size ``n_latent``, a decoder MLP maps
+    back. Hidden layers use ``activation_function`` (tanh by default); the
+    bottleneck and output layers are linear so the latent code and the
+    reconstruction are unbounded. Trained end-to-end on MSE with Adam.
+
+    Preprocessing (shared ``Projector`` path): ``preprocess_snapshot`` removes
+    the NaN solid mask and subtracts the temporal mean ``Q_mean``; the AE then
+    divides by a per-field scale ``_scale`` (one std per field, shape (N_x, 1))
+    so each field is O(1) and none is underweighted in the MSE. encode/decode
+    invert both.
+
+    Two solvers are shared with every projector: ``fit`` / ``encode`` /
+    ``decode`` / ``reconstruct`` / ``score`` from the base, so an AE is a
+    drop-in replacement for POD in the ROM pipeline.
+
+    After ``fit(X)`` the following are available:
+
+        encoder, decoder : nn.Sequential   trained networks
+        loss_history     : list[float]     mean training loss per epoch
+        _scale           : (N_x, 1)        per-field input normalisation
+        Q_mean           : (N_x, 1)        temporal mean (from the base)
+        fitted           : bool
+
+        Note:
+            X_hat = decode(encode(X)) ~= X   (N_x, N_t) in the original space.
+            encode returns Z (n_latent, N_t); decode maps Z back to (N_x, N_t).
+
+    Parameters
+    ----------
+    n_latent            : int    Bottleneck size.  Default: 10.
+    layer_dims          : tuple  Encoder hidden widths; decoder mirrors them.
+                                 Must stay above the largest latent so the
+                                 bottleneck is the latent, not a hidden layer.
+                                 Default: (512, 128).
+    activation_function : str    'tanh' | 'relu' | 'elu' | 'identity'.
+    learning_rate       : float  Adam step size.  Default: 1e-3.
+    n_epochs            : int    Max epochs.  Default: 500.
+    batch_size          : int    Minibatch size.  Default: 32.
+    val_fraction        : float  Held-out fraction for early stopping.  Default: 0.2.
+    weight_decay        : float  L2 penalty (Adam).  Default: 0.0.
+    patience            : int    Early-stopping patience in epochs.  Default: 50.
+    lr_factor           : float  ReduceLROnPlateau decay factor.  Default: 0.5.
+    lr_patience         : int    Epochs on a val plateau before decaying the LR.
+                                 Keep well below ``patience``.  Default: 10.
+    min_lr              : float  Lower bound on the LR.  Default: 1e-6.
+    seed                : int    Torch RNG seed.  Default: 0.
+    device              : str    'cpu' | 'cuda'.  Default: 'cpu'.
+    **kwargs            : Override any of the above at construction.
+
+    Examples
+    --------
+    ::
+
+        ae  = AE(n_latent=10, layer_dims=(128, 32)).fit(X)   # X (Nu, N_t, Nx, Ny)
+        Z   = ae.encode(X)               # (10, N_t)
+        Xr  = ae.reconstruct(X)          # (N_x, N_t)
+        mse = ae.score(X)
+    """
+
+    layer_dims: tuple = (512, 128)
+    activation_function: str = "tanh"
+    learning_rate: float = 1e-3
+    n_epochs: int = 500
+    batch_size: int = 32
+    val_fraction: float = 0.2  # early stopping
+    weight_decay: float = 0.0  # l2 regularization
+    patience: int = 50
+    threshold: float = 1e-4  # early stopping relative err
+
+    # ReduceLROnPlateau on the val loss
+    lr_factor: float = 0.5
+    lr_patience: int = 10
+    min_lr: float = 1e-6
+    seed: int = 0
+    device: str = "cpu"
+
+    _scale: Optional[np.ndarray] = None  # per-field input normalization (N_x, 1)
+
+    _ACT = {"tanh": nn.Tanh, "relu": nn.ReLU, "elu": nn.ELU, "identity": nn.Identity}
+
+    def __init__(self, n_latent: int = 10, **kwargs):
+        self.N_latent = n_latent
+        for key, val in kwargs.items():
+            if hasattr(type(self), key):
+                setattr(self, key, val)
+        torch.manual_seed(self.seed)
+
+    def _make_mlp(self, dims: list, last_linear: bool) -> nn.Sequential:
+        act = self._ACT[self.activation_function]
+        layers = []
+        for i in range(len(dims) - 1):
+            layers.append(nn.Linear(dims[i], dims[i + 1]))
+            is_last = i == len(dims) - 2
+            if not (is_last and last_linear):
+                layers.append(act())
+        return nn.Sequential(*layers)
+
+    def _build_networks(self, n_x: int) -> None:
+        enc_dims = [n_x, *self.layer_dims, self.N_latent]
+        dec_dims = [self.N_latent, *reversed(self.layer_dims), n_x]
+        self.encoder = self._make_mlp(enc_dims, last_linear=True).to(self.device)
+        self.decoder = self._make_mlp(dec_dims, last_linear=True).to(self.device)
+
+    # ── data helpers ──────────────────────────────────────────────────────────
+
+    def _to_torch(self, Q: np.ndarray) -> torch.Tensor:
+        return torch.as_tensor(
+            (Q / self._scale).T, dtype=torch.float32, device=self.device
+        )
+
+    def _from_torch(self, T: torch.Tensor) -> np.ndarray:
+        return T.detach().cpu().numpy().T * self._scale
+
+    def fit(self, X: np.ndarray) -> AE:
+        Q = self.preprocess_snapshot(X)  # (N_x, N_t), zero-mean
+        n_x, n_t = Q.shape
+        self._scale = self._field_scale(Q)  # per-field std (N_x, 1)
+        self._build_networks(n_x)
+
+        data = self._to_torch(Q)  # (N_t, N_x)
+        n_val = int(round(self.val_fraction * n_t))
+        X_tr, X_val = data[: n_t - n_val], data[n_t - n_val :]
+
+        params = list(self.encoder.parameters()) + list(self.decoder.parameters())
+        opt = torch.optim.Adam(
+            params, lr=self.learning_rate, weight_decay=self.weight_decay
+        )
+        loss_fn = nn.MSELoss()
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt,
+            factor=self.lr_factor,
+            patience=self.lr_patience,
+            min_lr=self.min_lr,
+        )
+
+        best_val, best_state, wait = float("inf"), None, 0
+        self.loss_history = []
+        self.val_loss_history = []
+        self.n_epochs_run = 0
+        for _ in range(self.n_epochs):
+            self.encoder.train()
+            self.decoder.train()
+            order = torch.randperm(X_tr.shape[0])
+            run = 0.0
+            for s in range(0, X_tr.shape[0], self.batch_size):
+                batch = X_tr[order[s : s + self.batch_size]]
+                opt.zero_grad()
+                loss = loss_fn(self.decoder(self.encoder(batch)), batch)
+                loss.backward()
+                opt.step()
+                run += loss.item() * batch.shape[0]
+            self.loss_history.append(run / X_tr.shape[0])
+            self.n_epochs_run += 1
+
+            # early stopping on held-out reconstruction
+            if n_val > 0:
+                self.encoder.eval()
+                self.decoder.eval()
+                with torch.no_grad():
+                    v = loss_fn(self.decoder(self.encoder(X_val)), X_val).item()
+                self.val_loss_history.append(v)
+                sched.step(v)
+                if v < best_val * (1.0 - self.threshold):
+                    best_val, wait = v, 0
+                    best_state = (
+                        deepcopy(self.encoder.state_dict()),
+                        deepcopy(self.decoder.state_dict()),
+                    )
+                else:
+                    wait += 1
+                    if wait >= self.patience:
+                        break
+
+        if best_state is not None:
+            self.encoder.load_state_dict(best_state[0])
+            self.decoder.load_state_dict(best_state[1])
+        self.fitted = True
+        return self
+
+    @property
+    def n_params(self) -> int:
+        return sum(
+            q.numel() for net in (self.encoder, self.decoder) for q in net.parameters()
+        )
+
+    def encode(self, X: np.ndarray) -> np.ndarray:
+        Q = self.preprocess_snapshot(X)
+        self.encoder.eval()
+        with torch.no_grad():
+            Z = self.encoder(self._to_torch(Q))
+        return Z.detach().cpu().numpy().T  # (N_latent, N_t)
+
+    def decode(self, Z: np.ndarray) -> np.ndarray:
+        Zt = torch.as_tensor(np.asarray(Z).T, dtype=torch.float32, device=self.device)
+        self.decoder.eval()
+        with torch.no_grad():
+            Q_hat = self.decoder(Zt)
+        return self._from_torch(Q_hat) + self.Q_mean  # (N_x, N_t)
+
+
+class CAE(Projector):
+    """
+    Convolutional Autoencoder.
+
+    PyTorch Conv2d encoder / ConvTranspose2d decoder on the 2-D spatial grid,
+    ending in a dense bottleneck of size ``n_latent``.
+    Stride-2 3x3 convs halving the grid each stage (tanh), flatten + Linear to
+    the latent, then the transposed mirror with output_padding to recover the size,
+    final conv linear.
+
+    Follows Racca et al. (2021) and Ozalp et al. (2024) — single-CAE variant
+
+    Grid requirement: each stride-2 stage halves the grid, and the decoder
+    inverts it with ``output_padding``. Only works when every stage keeps
+    the ``output_padding`` in ``[0, stride)``.
+    Odd dims raise a ``ValueError`` telling you to pad the grid.
+
+    After ``fit(X)`` the following are available:
+
+        enc_conv, dec_conv : nn.Sequential   conv / transposed-conv stacks
+        enc_fc, dec_fc     : nn.Linear       bottleneck in / out
+        _red_shape         : (C, W, H)       grid size at the bottleneck
+        loss_history       : list[float]     mean training loss per epoch
+        _scale             : (N_x, 1)        per-field input normalisation
+        Q_mean             : (N_x, 1)        temporal mean (from the base)
+
+        NB:
+            encode returns Z (n_latent, N_t); decode maps Z back to flat
+            (N_x, N_t) in the original space, consistent with POD/AE.
+
+    Parameters
+    ----------
+    n_latent            : int    Bottleneck size.  Default: 10.
+    channels            : tuple  Conv channel widths per encoder stage; the
+                                 decoder mirrors them.  Default: (16, 32, 64).
+    kernel_size         : int    Conv kernel size.  Default: 3.
+    stride              : int    Downsampling stride per stage.  Default: 2.
+    pad                 : int    Conv padding.  Default: 1.
+    activation_function : str    'tanh' | 'relu' | 'elu' | 'identity'.
+    learning_rate       : float  Adam step size.  Default: 1e-3.
+    n_epochs            : int    Max epochs.  Default: 500.
+    batch_size          : int    Minibatch size.  Default: 32.
+    val_fraction        : float  Held-out fraction for early stopping.  Default: 0.2.
+    weight_decay        : float  L2 penalty (Adam).  Default: 0.0.
+    patience            : int    Early-stopping patience in epochs.  Default: 50.
+    lr_factor           : float  ReduceLROnPlateau decay factor.  Default: 0.5.
+    lr_patience         : int    Epochs on a val plateau before decaying the LR.
+                                 Keep well below ``patience``.  Default: 10.
+    min_lr              : float  Lower bound on the LR.  Default: 1e-6.
+    seed                : int    Torch RNG seed.  Default: 0.
+    device              : str    'cpu' | 'cuda'.  Default: 'cpu'.
+    **kwargs            : Override any of the above at construction.
+
+    Examples
+    --------
+    ::
+
+        cae = CAE(n_latent=8, channels=(16, 32, 64)).fit(X)  # X (Nu, N_t, Nx, Ny)
+        Z   = cae.encode(X)              # (8, N_t)
+        Xr  = cae.reconstruct(X)         # (N_x, N_t)
+    """
+
+    channels: tuple = (16, 32, 64)
+    kernel_size: int = 3
+    stride: int = 2
+    pad: int = 1
+    activation_function: str = "tanh"
+    learning_rate: float = 1e-3
+    threshold: float = 1e-4
+    n_epochs: int = 500
+    batch_size: int = 32
+    val_fraction: float = 0.2
+    weight_decay: float = 0.0
+    patience: int = 50
+    lr_factor: float = 0.5
+    lr_patience: int = 10
+    min_lr: float = 1e-6
+    seed: int = 0
+    device: str = "cpu"
+
+    _scale: Optional[np.ndarray] = None  # per-field input normalization (N_x, 1)
+
+    _ACT = {"tanh": nn.Tanh, "relu": nn.ReLU, "elu": nn.ELU, "identity": nn.Identity}
+
+    def __init__(self, n_latent: int = 10, **kwargs):
+        self.N_latent = n_latent
+        for key, val in kwargs.items():
+            if hasattr(type(self), key):
+                setattr(self, key, val)
+        torch.manual_seed(self.seed)
+
+    # ── network construction ──────────────────────────────────────────────────
+
+    def _build_networks(self, c_in: int, nx: int, ny: int) -> None:
+        act = self._ACT[self.activation_function]
+        k, s, p = self.kernel_size, self.stride, self.pad
+
+        enc = []
+        c, w, h = c_in, nx, ny
+        sizes = [(w, h)]
+        for c_out in self.channels:
+            enc += [nn.Conv2d(c, c_out, k, s, p), act()]
+            c = c_out
+            w = (w + 2 * p - k) // s + 1
+            h = (h + 2 * p - k) // s + 1
+            sizes.append((w, h))
+
+        self._red_shape = (c, w, h)  # (C, W, H) at bottleneck
+        flat = c * w * h
+        self.enc_conv = nn.Sequential(*enc).to(self.device)
+        self.enc_fc = nn.Linear(flat, self.N_latent).to(self.device)
+        self.dec_fc = nn.Linear(self.N_latent, flat).to(self.device)
+
+        # decoder: mirror the encoder back up to c_in
+        dec_out = list(self.channels[-2::-1]) + [c_in]
+        targets = sizes[-2::-1]  # sizes to recover, top-down
+        dec = []
+        for i, c_out in enumerate(dec_out):
+            tw, th = targets[i]
+            op_w = tw - ((w - 1) * s - 2 * p + k)
+            op_h = th - ((h - 1) * s - 2 * p + k)
+            if not (0 <= op_w < s and 0 <= op_h < s):
+                raise ValueError(
+                    f"grid {nx}x{ny} not invertible with k={k},s={s},p={p}; "
+                    f"got output_padding ({op_w},{op_h}). Pad the grid to even dims."
+                )
+            dec.append(
+                nn.ConvTranspose2d(c, c_out, k, s, p, output_padding=(op_w, op_h))
+            )
+            if i < len(dec_out) - 1:  # final conv stays linear
+                dec.append(act())
+            c, w, h = c_out, tw, th
+        self.dec_conv = nn.Sequential(*dec).to(self.device)
+
+    def _networks(self) -> list:
+        return [self.enc_conv, self.enc_fc, self.dec_fc, self.dec_conv]
+
+    def _encode_grid(self, G: torch.Tensor) -> torch.Tensor:
+        return self.enc_fc(self.enc_conv(G).flatten(1))
+
+    def _decode_grid(self, Z: torch.Tensor) -> torch.Tensor:
+        return self.dec_conv(self.dec_fc(Z).view(-1, *self._red_shape))
+
+    # ── flat (N_x, N_t) <-> grid (N_t, Nu, Nx, Ny) with the solid mask ─────────
+
+    def _flat_to_grid(self, Q: np.ndarray) -> np.ndarray:
+        Nu, Nx, Ny = self.grid_shape
+        n_t = Q.shape[1]
+        n_fluid = int(self.fluid_mask_flat.sum())
+        full = np.zeros((Nu, n_t, Nx * Ny), dtype=Q.dtype)
+        A = Q.reshape(n_fluid, Nu, n_t).transpose(1, 2, 0)  # (Nu, Nt, N_fluid)
+        full[:, :, self.fluid_mask_flat] = A
+        return full.reshape(Nu, n_t, Nx, Ny).transpose(1, 0, 2, 3)  # (Nt,Nu,Nx,Ny)
+
+    def _grid_to_flat(self, G: np.ndarray) -> np.ndarray:
+        Nu, Nx, Ny = self.grid_shape
+        Gf = G.reshape(G.shape[0], Nu, Nx * Ny)[:, :, self.fluid_mask_flat]
+        return Gf.transpose(2, 1, 0).reshape(-1, G.shape[0])  # (N_fluid*Nu, Nt)
+
+    # ── Projector interface ────────────────────────────────────────────────────
+
+    def fit(self, X: np.ndarray) -> CAE:
+        Q = self.preprocess_snapshot(X)  # (N_x, N_t), zero-mean
+        assert self.grid_shape is not None, "CAE needs raw grid input to fit."
+        Nu, Nx, Ny = self.grid_shape
+        self._scale = self._field_scale(Q)  # per-field std (N_x, 1)
+        self._build_networks(Nu, Nx, Ny)
+
+        G = self._flat_to_grid(Q / self._scale)  # (N_t, Nu, Nx, Ny)
+        data = torch.as_tensor(G, dtype=torch.float32, device=self.device)
+        mask = torch.as_tensor(
+            self.fluid_mask_flat.reshape(Nx, Ny),
+            dtype=torch.float32,
+            device=self.device,
+        )[
+            None, None
+        ]  # (1,1,Nx,Ny)
+
+        n_t = data.shape[0]
+        n_val = int(round(self.val_fraction * n_t))
+        X_tr, X_val = data[: n_t - n_val], data[n_t - n_val :]
+
+        params = [q for net in self._networks() for q in net.parameters()]
+        opt = torch.optim.Adam(
+            params, lr=self.learning_rate, weight_decay=self.weight_decay
+        )
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt,
+            factor=self.lr_factor,
+            patience=self.lr_patience,
+            min_lr=self.min_lr,
+        )
+
+        def masked_mse(recon, target):
+            # divide by Nu too: the sum runs over the field channels, so without
+            # it this is Nu x a true mean and the CAE curves sit a constant
+            # factor above the AE ones for no physical reason
+            return ((recon - target) ** 2 * mask).sum() / (
+                mask.sum() * target.shape[0] * Nu
+            )
+
+        best_val, best_state, wait = float("inf"), None, 0
+        self.loss_history = []
+        self.val_loss_history = []
+        self.n_epochs_run = 0
+        for _ in range(self.n_epochs):
+            for net in self._networks():
+                net.train()
+            order = torch.randperm(X_tr.shape[0])
+            run = 0.0
+            for s in range(0, X_tr.shape[0], self.batch_size):
+                batch = X_tr[order[s : s + self.batch_size]]
+                opt.zero_grad()
+                recon = self._decode_grid(self._encode_grid(batch))
+                loss = masked_mse(recon, batch)
+                loss.backward()
+                opt.step()
+                run += loss.item() * batch.shape[0]
+            self.loss_history.append(run / X_tr.shape[0])
+            self.n_epochs_run += 1
+
+            if n_val > 0:
+                for net in self._networks():
+                    net.eval()
+                with torch.no_grad():
+                    v = masked_mse(
+                        self._decode_grid(self._encode_grid(X_val)), X_val
+                    ).item()
+                self.val_loss_history.append(v)
+                sched.step(v)
+                if v < best_val * (1.0 - self.threshold):
+                    best_val, wait = v, 0
+                    best_state = [
+                        deepcopy(net.state_dict()) for net in self._networks()
+                    ]
+                else:
+                    wait += 1
+                    if wait >= self.patience:
+                        break
+
+        if best_state is not None:
+            for net, st in zip(self._networks(), best_state):
+                net.load_state_dict(st)
+        self.fitted = True
+        return self
+
+    @property
+    def n_params(self) -> int:
+        return sum(q.numel() for net in self._networks() for q in net.parameters())
+
+    def encode(self, X: np.ndarray) -> np.ndarray:
+        Q = self.preprocess_snapshot(X)
+        G = torch.as_tensor(
+            self._flat_to_grid(Q / self._scale), dtype=torch.float32, device=self.device
+        )
+        for net in self._networks():
+            net.eval()
+        with torch.no_grad():
+            Z = self._encode_grid(G)
+        return Z.detach().cpu().numpy().T  # (N_latent, N_t)
+
+    def decode(self, Z: np.ndarray) -> np.ndarray:
+        Zt = torch.as_tensor(np.asarray(Z).T, dtype=torch.float32, device=self.device)
+        for net in self._networks():
+            net.eval()
+        with torch.no_grad():
+            G = self._decode_grid(Zt).detach().cpu().numpy()  # (N_t,Nu,Nx,Ny)
+        return self._grid_to_flat(G) * self._scale + self.Q_mean  # (N_x, N_t)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Proper Orthogonal Decomposition (POD)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class POD(Projector):
+    """
+    Snapshot POD.
+
+    Inherits the shared interface from ``Projector`` (fit/encode/decode/
+    reconstruct/score/copy/N_latent) and adds linear-specific attributes,
+    geometry helpers, and plotting utilities.
+
+    Two solvers are available via ``method``:
+
+    ``'exact'``
+        Full eigendecomposition of the temporal correlation matrix C = Q^T Q / N_t.
+        Returns all N_t modes.  Exact but O(N_t^3).
+
+    ``'randomized'``  (default)
+        Randomized SVD (Halko, Martinsson & Tropp 2011).  Returns only the
+        leading ``n_modes`` modes.  Fast and memory-efficient for large data.
+
+    After ``fit(X)`` the following attributes are available:
+
+        Sigma  (N_latent,)      singular values, descending
+        Psi    (N_x, N_latent)  spatial modes (orthonormal columns)
+        Phi    (N_latent, N_t)  temporal coefficients from training data
+        Q_mean (N_x, 1)         temporal mean
+
+        Note:
+            X = Psi @ Phi + Q_mean  (N_x, N_t)  is the training data reconstruction.
+            Q = X - Q_mean is the zero-mean data used for the decomposition.
+
+    Parameters
+    ----------
+    n_modes      : int         Modes / latent-space size.  Default: 20.
+    method       : str         'exact' | 'randomized'.  Default: 'randomized'.
+    n_iter       : int         Power-iteration steps for 'randomized'.  Default: 4.
+    random_state : int | None  Seed for reproducibility.
+    grid_shape   : tuple       Optional (Nu, Nx, Ny) for restore_shape().
+    domain       : list        Optional [x0, x1, y0, y1] for domain_mesh.
+    **kwargs     : Pre-set any instance attribute (e.g. Sigma=s, Psi=p, …).
+
+    Examples
+    --------
+    ::
+
+        pod = POD(n_modes=20).fit(Q)
+        Z   = pod.encode(Q)              # (20, N_t)
+        Q_r = pod.reconstruct(Q)         # (N_x, N_t)
+
+        # if directly from data:
+        pod = POD(X=X, n_modes=20)
+
+    Loading pre-computed results::
+
+        pod = POD(Sigma=s, Psi=p, Phi=ph, Q_mean=m, grid_shape=gs)
+    """
+
+    # ── class-level defaults ─────────────────────────────────────────────────
+    _Sigma: Optional[np.ndarray] = None
+    _Psi: Optional[np.ndarray] = None
+    _Phi: Optional[np.ndarray] = None
+    grid_shape: Optional[tuple] = None  # (Nu, Nx, Ny) for restore_shape
+    domain: Optional[list] = None  # [x0, x1, y0, y1]
+    field_labels: list = ["$u_x$", "$u_y$"]
+    _TKE: Optional[float] = None
+    indices_to_original_grid: Optional[np.ndarray] = None
+    method: str = "randomized"
+    n_iter: int = 4
+    random_state: Optional[int] = None
+
+    @property
+    def Sigma(self) -> np.ndarray:
+        if self._Sigma is None:
+            raise AttributeError("Not fitted — call fit() first.")
+        return self._Sigma
+
+    @Sigma.setter
+    def Sigma(self, v: np.ndarray) -> None:
+        self._Sigma = v
+
+    @property
+    def Psi(self) -> np.ndarray:
+        if self._Psi is None:
+            raise AttributeError("Not fitted — call fit() first.")
+        return self._Psi
+
+    @Psi.setter
+    def Psi(self, v: np.ndarray) -> None:
+        self._Psi = v
+
+    @property
+    def Phi(self) -> np.ndarray:
+        if self._Phi is None:
+            raise AttributeError("Not fitted — call fit() first.")
+        return self._Phi
+
+    @Phi.setter
+    def Phi(self, v: np.ndarray) -> None:
+        self._Phi = v
+
+    def __init__(
+        self,
+        n_modes: int = 20,
+        method: str = "randomized",
+        n_iter: int = 4,
+        random_state: Optional[int] = None,
+        grid_shape: Optional[tuple] = None,
+        domain: Optional[list] = None,
+        **kwargs,
+    ):
+        self.N_latent = n_modes
+        self.grid_shape = grid_shape
+        self.domain = domain
+        self.method = method
+        self.n_iter = n_iter
+        self.random_state = random_state
+        for key, val in kwargs.items():
+            if hasattr(type(self), key) or key in (
+                "Sigma",
+                "Psi",
+                "Phi",
+                "Q_mean",
+                "_TKE",
+                "indices_to_original_grid",
+            ):
+                setattr(self, key, val)
+        # infer latent size from pre-loaded Phi if provided
+        if self._Phi is not None and self.N_latent == 20:
+            self.N_latent = self._Phi.shape[0]
+        # backward compat: auto-fit if raw data provided as kwarg 'X'
+        if "X" in kwargs and kwargs["X"] is not None:
+            self.fit(kwargs["X"])
+
+    # ── N_modes backward-compat alias ─────────────────────────────────────────
+
+    @property
+    def N_modes(self) -> int:
+        """Backward-compatible alias for N_latent."""
+        return self.N_latent
+
+    @N_modes.setter
+    def N_modes(self, value: int) -> None:
+        self.N_latent = value
+
+    # ── decomposition hook (overridden by SPOD) ────────────────────────────────
+
+    def _decompose(self, Q: np.ndarray) -> tuple:
+        """
+        Run the SVD/eigendecomposition on zero-mean Q.
+
+        Returns
+        -------
+        Sigma  : (N_latent,)
+        Psi    : (N_x, N_latent)
+        Phi    : (N_latent, N_t)
+        """
+        if self.method == "exact":
+            Sigma, Psi, Phi, C = snapshot_pod(Q)
+            self._C = C
+            return Sigma[: self.N_latent], Psi[:, : self.N_latent], Phi[: self.N_latent]
+        elif self.method == "randomized":
+            return snapshot_pod_randomized(
+                Q,
+                n_modes=self.N_latent,
+                n_iter=self.n_iter,
+                random_state=self.random_state,
+            )
+        else:
+            raise ValueError(
+                f"Unknown method '{self.method}'. " "Choose 'exact' or 'randomized'."
+            )
+
+    # ── Projector interface ────────────────────────────────────────────────────
+
+    def fit(self, X: np.ndarray) -> POD:
+        """
+        Fit the POD to data X.
+
+        Accepts a flat matrix X (N_x, N_t) or a raw grid array
+        (Nu, N_t, Nx, Ny) / (N_t, Nx, Ny). For raw grid input the NaN
+        cylinder mask is detected and stored automatically.
+        """
+
+        Q = self.preprocess_snapshot(X)
+
+        result = self._decompose(Q)
+        self.Sigma = result[0]
+        self.Psi = result[1]
+        self.Phi = result[2]
+        assert (
+            self._Sigma is not None and self._Psi is not None and self._Phi is not None
+        ), "Decomposition must return Sigma, Psi, Phi."
+        self.N_latent = self.Sigma.shape[0]
+        self.fitted = True
+        return self
+
+    @property
+    def n_params(self) -> int:
+        return int(self.Psi.size)
+
+    def encode(self, X: np.ndarray) -> np.ndarray:
+        """
+        Project X onto the spatial modes.
+
+            Z = Psi^T (X - Q_mean)    shape (N_latent, N_t)
+        """
+        Q = self.preprocess_snapshot(X)
+        return self.Psi.T @ Q
+
+    def decode(self, Z: np.ndarray, idx: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        Reconstruct from latent coefficients.
+            - Z : latent coefficients (N_latent, N_t)
+            - idx : optional indices to select a subset of the spatial modes (Psi) and mean (Q_mean).
+        Returns the reconstructed state in the original space:
+            Q_hat = Psi Z + Q_mean    shape (len(idx), N_t) or (N_fluid * n_fields, N_t) if idx is provided.
+        """
+
+        if idx is not None:
+            return self.Psi[idx, :] @ Z + self.Q_mean[idx, :]
+        else:
+            return self.Psi @ Z + self.Q_mean
+
+    def reconstruct(
+        self,
+        X: Optional[np.ndarray] = None,
+        n_modes: Optional[int] = None,
+        Phi: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """
+        Full round-trip: encode → decode → to_grid (when mask is available).
+
+        Parameters
+        ----------
+        X       : raw input (grid or flat).  If None, uses stored Phi.
+        n_modes : retain only the first n_modes modes.  Default: all.
+        Phi     : pre-computed latent coefficients (N_latent, N_t); skips encode.
+        """
+        if Phi is not None:
+            Z = Phi
+        elif X is not None:
+            Z = self.encode(X)
+        else:
+            Z = self.Phi
+
+        nm = n_modes if n_modes is not None else self.N_latent
+        if nm < self.N_latent:
+            X_hat = self.Psi[:, :nm] @ Z[:nm] + self.Q_mean
+        else:
+            X_hat = self.decode(Z)
+        if getattr(self, "to_grid", None) is not None and self.grid_shape is not None:
+            return self._to_physical_grid(X_hat)
+        return X_hat
+
+    # ── utilities ─────────────────────────────────────────────────────────────
+
+    def energy_fraction(self):
+        """
+        Relative and cumulative energy per mode.
+        - rel = lam / sum(lam) where lam = Sigma^2 are the eigenvalues of the correlation matrix C.
+        - cum = np.cumsum(rel) is the cumulative fraction of energy captured by the first j modes.
+
+        Returns
+        -------
+        rel : ndarray (N_latent,)  fraction of total energy per mode
+        cum : ndarray (N_latent,)  cumulative fraction
+        """
+        lam = self.Sigma**2  # eigenvalues of C = Q^T Q / N_t
+
+        return lam / lam.sum(), np.cumsum(lam) / lam.sum()
+
+    def truncate(self, n_modes: int) -> POD:
+        """Truncate to the first n_modes modes in-place."""
+        if n_modes >= self.N_latent:
+            print(
+                f"Requested n_modes={n_modes} >= N_latent={self.N_latent}. No truncation applied."
+            )
+            return self
+        self.Psi = self.Psi[:, :n_modes]
+        self.Phi = self.Phi[:n_modes, :]
+        self.Sigma = self.Sigma[:n_modes]
+        self.N_latent = n_modes
+        return self
+
+    @property
+    def domain_mesh(self):
+        """
+        Meshgrid for the spatial domain.
+
+        Returns
+        -------
+        X1, X2 : ndarray  Coordinate arrays shaped (Nx, Ny).
+        """
+        if self.domain is None or self.grid_shape is None:
+            raise ValueError("Both domain and grid_shape must be set.")
+        x1 = np.linspace(*self.domain[:2], num=self.grid_shape[-2])
+        x2 = np.linspace(*self.domain[2:], num=self.grid_shape[-1])
+        return np.meshgrid(x1, x2, indexing="ij")
+
+    def original_data_to_domain_of_interest(self, original_data: np.ndarray):
+        """Crop original-grid data to the fitted domain of interest."""
+        if self.indices_to_original_grid is None:
+            return original_data
+        original_data = original_data.copy()
+        try:
+            if original_data.ndim == 2:
+                return original_data[self.indices_to_original_grid]
+            return original_data[
+                :, self.indices_to_original_grid[0], self.indices_to_original_grid[1]
+            ]
+        except Exception:
+            raise ValueError("Pass original_data in shape [(Nu) x Nx x Ny x (Nt)].")
+
+    # ── metrics ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def compute_MSE(
+        ROM_data: np.ndarray, original_data: np.ndarray, time_evolution: bool = False
+    ):
+        """Mean Squared Error between ROM reconstruction and original data."""
+        ROM_data, original_data = POD.flatten(ROM_data, original_data)
+        original_data[np.isnan(original_data)] = 0.0
+        if time_evolution:
+            return np.mean((original_data - ROM_data) ** 2, axis=0)
+        return float(np.mean((original_data - ROM_data) ** 2))
+
+    @staticmethod
+    def compute_RMS(ROM_data: np.ndarray, original_data: np.ndarray):
+        """Root Mean Square error (field)."""
+        original_data[np.isnan(original_data)] = 0.0
+        return np.sqrt((original_data - ROM_data) ** 2)
+
+    @staticmethod
+    def flatten(*args):
+        """Flatten multi-dimensional arrays to 2-D (space × time)."""
+        return [a.reshape(-1, a.shape[-1]) if a.ndim > 2 else a.copy() for a in args]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPOD (Sieber)  — inherits from POD, only overrides _decompose
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class SPOD(POD):
+    """
+    Spectral POD — Sieber, Paschereit & Oberleithner (JFM 2016).
+
+    Inherits the full POD interface.  The only difference is that the snapshot
+    correlation matrix C is replaced by a low-pass filtered version
+
+        C_tilde = G^T C G
+
+    where G is a banded symmetric Toeplitz filter matrix.  Setting ``Nf=0``
+    exactly recovers snapshot POD.
+
+    Parameters
+    ----------
+    Nf          : int   Filter half-width (0 = POD limit, N_t/2 = DFT limit).
+    filter_kind : str   'gaussian' | 'box' | 'hann'.  Default: 'gaussian'.
+    n_modes     : int   Modes to retain.  Default: all (N_t).
+    grid_shape  : tuple Optional (Nu, Nx, Ny) for
+    domain      : list  Optional [x0, x1, y0, y1] for domain_mesh.
+
+    Attributes
+    ----------
+    C_tilde : ndarray (N_t, N_t)  Filtered correlation matrix (stored after fit).
+    """
+
+    def __init__(
+        self,
+        Nf: int = 0,
+        filter_kind: str = "gaussian",
+        n_modes: int = 20,
+        grid_shape: Optional[tuple] = None,
+        domain: Optional[list] = None,
+        **kwargs,
+    ):
+        super().__init__(
+            n_modes=n_modes, grid_shape=grid_shape, domain=domain, **kwargs
+        )
+        self.Nf = Nf
+        self.filter_kind = filter_kind
+        self._n_modes_requested = n_modes  # None = keep all after fit
+
+    def _decompose(self, Q: np.ndarray) -> tuple:
+        Sigma, Psi, Phi, C_tilde = spod_sieber(Q, self.Nf, self.filter_kind)
+        self.C_tilde = C_tilde
+        if self._n_modes_requested is not None:
+            nm = min(self._n_modes_requested, Sigma.shape[0])
+            return Sigma[:nm], Psi[:, :nm], Phi[:nm]
+        self.N_latent = Sigma.shape[0]
+        return Sigma, Psi, Phi
