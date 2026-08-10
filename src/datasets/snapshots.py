@@ -193,7 +193,40 @@ def load_snapshots(spec: SnapshotSpec) -> np.ndarray:
 # resolution defaults only. model hyperparameters stay with the experiment that
 # chose them, not here
 
-SPECS = {
+def _env_override(key: str, spec: SnapshotSpec) -> SnapshotSpec:
+    """Point a dataset at a pre-decimated copy, from the environment.
+
+    `hpc/make_subset.py` writes a smaller file than the spec assumes so that
+    only a fraction has to cross the network. Redirecting a spec at one means
+    moving `filename` and `downsample` *together*: the subset is already
+    decimated, so reusing the original factor silently changes resolution
+    rather than failing. Both are therefore required as a pair.
+
+        BL_FILE=Challenge1.1_train_sub.h5 BL_DOWNSAMPLE=4,4
+
+    Read at import, so the variables have to be exported before the process
+    starts -- which is what the job scripts do.
+    """
+    filename = os.environ.get(f"{key.upper()}_FILE")
+    downsample = os.environ.get(f"{key.upper()}_DOWNSAMPLE")
+    if filename is None and downsample is None:
+        return spec
+    if filename is None or downsample is None:
+        raise ValueError(
+            f"{key.upper()}_FILE and {key.upper()}_DOWNSAMPLE must be set together; "
+            f"got file={filename!r} downsample={downsample!r}. Setting one alone "
+            "changes resolution silently."
+        )
+    try:
+        xs, ys = (int(v) for v in downsample.split(","))
+    except ValueError:
+        raise ValueError(
+            f"{key.upper()}_DOWNSAMPLE must be 'xs,ys', got {downsample!r}"
+        ) from None
+    return spec.replace(filename=filename, downsample=(xs, ys))
+
+
+_SPECS = {
     "bl": SnapshotSpec(
         filename="Challenge1.1_train.h5",
         fields=("Uplane", "Vplane", "Wplane"),
@@ -217,3 +250,5 @@ SPECS = {
         max_snapshots=500,
     ),
 }
+
+SPECS = {k: _env_override(k, v) for k, v in _SPECS.items()}
