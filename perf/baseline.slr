@@ -1,0 +1,32 @@
+#!/bin/bash
+# Baseline timing sweep, sharded one task per GPU.
+#
+# --array=0-2 with --gres=gpu:tesla_t4:1 gives each shard its own card. Packing
+# shards onto one GPU would be faster to schedule but scattered identical
+# configs by 3.5x when tried, which defeats the point of a timing baseline.
+#SBATCH --job-name=baseline
+#SBATCH --partition=gpu
+#SBATCH --account=aero_research_novoa
+#SBATCH --gres=gpu:tesla_t4:1
+#SBATCH --array=0-2
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32000MB
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/%x-%A_%a.out
+#SBATCH --error=logs/%x-%A_%a.err
+
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+export MPLBACKEND=Agg
+export DATA_ROOT="$HOME/data"
+export BL_FILE="Challenge1.1_train_sub.h5"
+export BL_DOWNSAMPLE="4,4"
+
+mkdir -p logs perf/results
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+
+uv run python perf/baseline.py \
+    --shard "${SLURM_ARRAY_TASK_ID}" \
+    --nshards "${SLURM_ARRAY_TASK_COUNT}"

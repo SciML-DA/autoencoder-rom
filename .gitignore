@@ -22,3 +22,7 @@ wandb/
 .vscode/
 .ruff_cache/
 
+
+# perf timing output is machine-specific; the harness is tracked, results are not
+perf/results/
+perf/golden.json
