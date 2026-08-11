@@ -40,21 +40,62 @@ sys.path.insert(0, "scripts")
 
 OUT = Path("perf/results")
 LATENTS = (2, 4, 8, 16, 32, 64, 128, 256)
-MODELS = ("POD", "AE", "CAE", "AEJax", "CAEJax")
-DATASETS_TO_RUN = ("circle", "bl")
 WARM, MEASURE = 2, 15
 
+# bl is the target dataset; circle runs default-width only, as a cross-check
+PRIMARY = "bl"
+SECONDARY = "circle"
+
+# Varying width at fixed latent decouples parameter count from latent size --
+# without it, every point on a cost-vs-params curve also moves in latent, and
+# the two effects cannot be told apart.
+AE_HIDDEN = {
+    "half": lambda k: (4 * k, k),
+    "default": lambda k: (8 * k, 2 * k),      # SCALED_HIDDEN in the study
+    "double": lambda k: (16 * k, 4 * k),
+    "fixed_sm": lambda k: (128, 64),          # width independent of latent
+    "fixed_lg": lambda k: (1024, 256),
+}
+CAE_CONV = {
+    "narrow": {"channels": (8, 16, 32), "kernel_size": 3, "stride": 2, "pad": 1},
+    "default": {"channels": (16, 32, 64), "kernel_size": 3, "stride": 2, "pad": 1},
+    "wide": {"channels": (32, 64, 128), "kernel_size": 3, "stride": 2, "pad": 1},
+    "deep": {"channels": (16, 32, 64, 128), "kernel_size": 3, "stride": 2, "pad": 1},
+}
+
 FIELDS = [
-    "dataset", "model", "latent", "n_params", "s_per_epoch", "epochs_measured",
-    "compile_s", "total_fit_s", "peak_mem_mb", "n_train", "n_x", "gpu",
+    "dataset", "model", "latent", "variant", "n_params", "s_per_epoch",
+    "epochs_measured", "compile_s", "total_fit_s", "peak_mem_mb",
+    "n_train", "n_x", "gpu",
 ]
 
 
-def configs() -> list[tuple[str, str, int]]:
-    return [(d, m, k) for d in DATASETS_TO_RUN for k in LATENTS for m in MODELS]
+def configs() -> list[tuple[str, str, int, str]]:
+    """(dataset, model, latent, variant) over the full grid."""
+    out = []
+    for k in LATENTS:
+        out.append((PRIMARY, "POD", k, "default"))
+        for v in AE_HIDDEN:
+            out += [(PRIMARY, "AE", k, v), (PRIMARY, "AEJax", k, v)]
+        for v in CAE_CONV:
+            out += [(PRIMARY, "CAE", k, v), (PRIMARY, "CAEJax", k, v)]
+        # secondary dataset: default width only, to keep the grid affordable
+        for m in ("POD", "AE", "AEJax", "CAE", "CAEJax"):
+            out.append((SECONDARY, m, k, "default"))
+    return out
 
 
-def run(dataset: str, model: str, n_latent: int, cache: dict) -> dict:
+def variant_spec(base: dict, model: str, variant: str) -> dict:
+    """A copy of the study's spec with only the width overridden."""
+    spec = dict(base)
+    if model in ("AE", "AEJax"):
+        spec["hidden"] = AE_HIDDEN[variant]
+    elif model in ("CAE", "CAEJax"):
+        spec["conv"] = CAE_CONV[variant]
+    return spec
+
+
+def run(dataset: str, model: str, n_latent: int, variant: str, cache: dict) -> dict:
     import torch
 
     from convergence_study import DATASETS, build_models, fit_data, pick_device
@@ -68,7 +109,7 @@ def run(dataset: str, model: str, n_latent: int, cache: dict) -> dict:
         cache[dataset] = (X_fit, val_fraction, meta, n_x)
     X_fit, val_fraction, meta, n_x = cache[dataset]
 
-    spec = DATASETS[dataset]
+    spec = variant_spec(DATASETS[dataset], model, variant)
     device = pick_device()
     gpu = torch.cuda.get_device_name(0) if device == "cuda" else device
 
@@ -92,17 +133,18 @@ def run(dataset: str, model: str, n_latent: int, cache: dict) -> dict:
         # a single truncated SVD, not an epoch loop: s/epoch is meaningless
         t, _, npar, peak = fit(0)
         return dict(
-            dataset=dataset, model=model, latent=n_latent, n_params=npar,
-            s_per_epoch=float("nan"), epochs_measured=0, compile_s=float("nan"),
-            total_fit_s=t, peak_mem_mb=peak, n_train=meta["n_train"], n_x=n_x, gpu=gpu,
+            dataset=dataset, model=model, latent=n_latent, variant=variant,
+            n_params=npar, s_per_epoch=float("nan"), epochs_measured=0,
+            compile_s=float("nan"), total_fit_s=t, peak_mem_mb=peak,
+            n_train=meta["n_train"], n_x=n_x, gpu=gpu,
         )
 
     t_warm, r_warm, npar, _ = fit(WARM)          # absorbs JIT / autotune
     t, ran, _, peak = fit(MEASURE)               # steady state only
     s = t / max(ran, 1)
     return dict(
-        dataset=dataset, model=model, latent=n_latent, n_params=npar,
-        s_per_epoch=s, epochs_measured=ran,
+        dataset=dataset, model=model, latent=n_latent, variant=variant,
+        n_params=npar, s_per_epoch=s, epochs_measured=ran,
         compile_s=t_warm - s * max(r_warm, 1),
         total_fit_s=t, peak_mem_mb=peak, n_train=meta["n_train"], n_x=n_x, gpu=gpu,
     )
@@ -117,20 +159,20 @@ def cmd_run(a) -> None:
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
-        for i, (d, m, k) in enumerate(mine, 1):
+        for i, (d, m, k, v) in enumerate(mine, 1):
             try:
-                row = run(d, m, k, cache)
+                row = run(d, m, k, v, cache)
             except Exception as e:
-                print(f"  [{i}/{len(mine)}] {d}/{m}@{k} FAILED {type(e).__name__}: {e}"[:150], flush=True)
+                print(f"  [{i}/{len(mine)}] {d}/{m}/{v}@{k} FAILED {type(e).__name__}: {e}"[:150], flush=True)
                 continue
             w.writerow(row)
             f.flush()
             sp = row["s_per_epoch"]
             print(
-                f"  [{i}/{len(mine)}] {d:7s} {m:7s} k={k:<4d} "
+                f"  [{i}/{len(mine)}] {d:7s} {m:7s} {v:8s} k={k:<4d} "
                 f"params={row['n_params']:>12,.0f} "
                 + (f"s/epoch={sp:7.3f}" if sp == sp else f"fit={row['total_fit_s']:7.3f}s")
-                + f" mem={row['peak_mem_mb']:7.0f}MB",
+                + f" cmp={row['compile_s']:6.2f}",
                 flush=True,
             )
 
