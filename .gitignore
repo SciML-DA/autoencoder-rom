@@ -14,6 +14,10 @@ data/
 results/**
 !results/**/
 !results/**/results.csv
+# performance baselines are the reference every optimisation is measured
+# against, so their figures are tracked too, not just the csv
+!results/performance/**/*.png
+!results/performance/**/README.md
 wandb/
 *.o[0-9]*
 *.e[0-9]*
