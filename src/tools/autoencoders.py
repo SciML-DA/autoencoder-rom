@@ -43,7 +43,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import numpy as np
 
-from copy import deepcopy
 from typing import Optional
 import torch
 import torch.nn as nn
@@ -51,6 +50,41 @@ import torch.nn as nn
 from .pod_spod import snapshot_pod, snapshot_pod_randomized, spod_sieber
 
 __all__ = ["Projector", "AE", "CAE", "POD", "SPOD"]
+
+
+def _alloc_snapshot(nets) -> list[dict]:
+    """Buffers to hold the best-so-far weights, allocated once."""
+    return [{k: torch.empty_like(v) for k, v in n.state_dict().items()} for n in nets]
+
+
+@torch.no_grad()
+def _save_snapshot(nets, buffers: list[dict]) -> None:
+    """Copy current weights into the preallocated buffers.
+
+    Early in training the val loss improves on almost every epoch, so a
+    `deepcopy(state_dict())` here reallocated every parameter each time (236 MB
+    per improvement at AE@256). Same bytes are copied, but into buffers that
+    already exist, so the allocator stays out of the loop.
+    """
+    for n, buf in zip(nets, buffers):
+        for k, v in n.state_dict().items():
+            buf[k].copy_(v)
+
+
+def _fused_adam_ok(params) -> dict:
+    """`fused=True` where torch supports it, plain Adam otherwise.
+
+    Fused Adam is CUDA-only and needs floating-point params; asking for it on
+    CPU raises rather than falling back, so this is a capability check, not a
+    preference. `foreach=True` is the next best thing and is what torch would
+    pick anyway on CUDA -- naming it keeps behaviour identical across versions.
+    """
+    if not params:
+        return {}
+    p0 = params[0]
+    if p0.is_cuda and p0.dtype in (torch.float32, torch.float64, torch.float16):
+        return {"fused": True}
+    return {"foreach": True} if p0.is_cuda else {}
 
 
 class Projector(ABC):
@@ -364,8 +398,17 @@ class AE(Projector):
         X_tr, X_val = data[: n_t - n_val], data[n_t - n_val :]
 
         params = list(self.encoder.parameters()) + list(self.decoder.parameters())
+        # The default Adam path loops over parameter tensors in Python and
+        # launches several tiny kernels per tensor; profiling put 47% of CUDA
+        # time in Adam.step. fused=True does the whole update in one kernel.
+        # It reassociates the elementwise arithmetic, so results shift by
+        # ~float32 eps -- about a thousand times smaller than the seed-to-seed
+        # spread these results already carry.
         opt = torch.optim.Adam(
-            params, lr=self.learning_rate, weight_decay=self.weight_decay
+            params,
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+            **_fused_adam_ok(params),
         )
         loss_fn = nn.MSELoss()
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -375,14 +418,23 @@ class AE(Projector):
             min_lr=self.min_lr,
         )
 
-        best_val, best_state, wait = float("inf"), None, 0
+        best_val, wait = float("inf"), 0
+        best_state = _alloc_snapshot((self.encoder, self.decoder))
+        have_best = False
         self.loss_history = []
         self.val_loss_history = []
         self.n_epochs_run = 0
         for _ in range(self.n_epochs):
             self.encoder.train()
             self.decoder.train()
-            order = torch.randperm(X_tr.shape[0])
+            # randperm stays on CPU so the RNG stream -- and therefore the exact
+            # batch ordering -- is unchanged; only the transfer moves. Indexing a
+            # device tensor with a CPU index tensor copies it per step; sending
+            # the permutation once per epoch does it once instead.
+            # NOT non_blocking: from pageable memory that copy is genuinely
+            # async and the very next line indexes with it, which under real
+            # training load silently gathered stale rows.
+            order = torch.randperm(X_tr.shape[0]).to(X_tr.device)
             run = 0.0
             for s in range(0, X_tr.shape[0], self.batch_size):
                 batch = X_tr[order[s : s + self.batch_size]]
@@ -404,16 +456,14 @@ class AE(Projector):
                 sched.step(v)
                 if v < best_val * (1.0 - self.threshold):
                     best_val, wait = v, 0
-                    best_state = (
-                        deepcopy(self.encoder.state_dict()),
-                        deepcopy(self.decoder.state_dict()),
-                    )
+                    _save_snapshot((self.encoder, self.decoder), best_state)
+                    have_best = True
                 else:
                     wait += 1
                     if wait >= self.patience:
                         break
 
-        if best_state is not None:
+        if have_best:
             self.encoder.load_state_dict(best_state[0])
             self.decoder.load_state_dict(best_state[1])
         self.fitted = True
@@ -623,8 +673,17 @@ class CAE(Projector):
         X_tr, X_val = data[: n_t - n_val], data[n_t - n_val :]
 
         params = [q for net in self._networks() for q in net.parameters()]
+        # The default Adam path loops over parameter tensors in Python and
+        # launches several tiny kernels per tensor; profiling put 47% of CUDA
+        # time in Adam.step. fused=True does the whole update in one kernel.
+        # It reassociates the elementwise arithmetic, so results shift by
+        # ~float32 eps -- about a thousand times smaller than the seed-to-seed
+        # spread these results already carry.
         opt = torch.optim.Adam(
-            params, lr=self.learning_rate, weight_decay=self.weight_decay
+            params,
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+            **_fused_adam_ok(params),
         )
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
             opt,
@@ -641,14 +700,23 @@ class CAE(Projector):
                 mask.sum() * target.shape[0] * Nu
             )
 
-        best_val, best_state, wait = float("inf"), None, 0
+        best_val, wait = float("inf"), 0
+        best_state = _alloc_snapshot(tuple(self._networks()))
+        have_best = False
         self.loss_history = []
         self.val_loss_history = []
         self.n_epochs_run = 0
         for _ in range(self.n_epochs):
             for net in self._networks():
                 net.train()
-            order = torch.randperm(X_tr.shape[0])
+            # randperm stays on CPU so the RNG stream -- and therefore the exact
+            # batch ordering -- is unchanged; only the transfer moves. Indexing a
+            # device tensor with a CPU index tensor copies it per step; sending
+            # the permutation once per epoch does it once instead.
+            # NOT non_blocking: from pageable memory that copy is genuinely
+            # async and the very next line indexes with it, which under real
+            # training load silently gathered stale rows.
+            order = torch.randperm(X_tr.shape[0]).to(X_tr.device)
             run = 0.0
             for s in range(0, X_tr.shape[0], self.batch_size):
                 batch = X_tr[order[s : s + self.batch_size]]
@@ -672,15 +740,14 @@ class CAE(Projector):
                 sched.step(v)
                 if v < best_val * (1.0 - self.threshold):
                     best_val, wait = v, 0
-                    best_state = [
-                        deepcopy(net.state_dict()) for net in self._networks()
-                    ]
+                    _save_snapshot(tuple(self._networks()), best_state)
+                    have_best = True
                 else:
                     wait += 1
                     if wait >= self.patience:
                         break
 
-        if best_state is not None:
+        if have_best:
             for net, st in zip(self._networks(), best_state):
                 net.load_state_dict(st)
         self.fitted = True

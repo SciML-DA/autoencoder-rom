@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -N sensors
+#PBS -l select=1:ncpus=8:mem=64gb
+#PBS -l walltime=04:00:00
+#
+# POD-LSE baseline on the April experiment. CPU only -- POD-LSE is one SVD and
+# one small solve, so a GPU would sit idle. Add
+#   #PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
+# once the two-branch autoencoder is in the loop.
+#
+# Sizing: 6085 snapshots x 159 x 99 x 2 fields is ~1.5 GB in float64. The
+# snapshot-POD correlation route is Nt x Nt = 6085^2, another ~300 MB. 64 GB is
+# generous but the SVD workspace is the part that bites.
+set -euo pipefail
+
+# No `module load tools/prod` -- it puts EasyBuild's site-packages on
+# PYTHONPATH, which leaks into the uv environment and shadows its packages.
+# The venv built by setup_env_cx3.sh is self-contained. Load modules here only
+# if a job needs something outside it (CUDA drivers, MPI).
+unset PYTHONPATH
+
+export PATH="$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="${EPHEMERAL}/.cache/uv"
+export MPLBACKEND=Agg
+export RDS_ROOT=/rds/general/project/immanuel/live/Seagate/april_experiment
+
+cd "$PBS_O_WORKDIR"
+
+# Read straight from the project space rather than staging. The Challenge1.1
+# job stages a 34 GB h5 to $TMPDIR because it re-reads it every epoch; here the
+# snapshots are read once into memory, so a copy would only add a copy.
+#
+# If a later job does re-read them, stage first -- 6085 small .npz files is a
+# lot of metadata operations against a shared filesystem, which is exactly the
+# access pattern RDS is worst at:
+#   cp -r "$RDS_ROOT/4p5d_10ms_yaw_0_0_0/piv_snapshots_highres" "$TMPDIR/"
+
+uv run python scripts/podlse_baseline.py "$@"

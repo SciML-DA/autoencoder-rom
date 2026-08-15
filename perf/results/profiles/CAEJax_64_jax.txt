@@ -1,0 +1,19 @@
+op                                                     total ms      %   calls
+$autoencoders_jax.py:1049 fit                           1313.44  13.8%       1
+$autoencoders_jax.py:885 fit_cae_params                  871.45   9.1%       1
+PjRtCApiLoadedExecutable::Execute                        540.03   5.7%    1622
+$array.py:338 __getitem__                                505.22   5.3%     174
+$indexing.py:1080 rewriting_take                         503.08   5.3%     174
+$indexing.py:1200 _gather                                476.13   5.0%     168
+PjitFunction(cae_train_step)                             420.98   4.4%     336
+$indexing.py:577 to_gather                               410.94   4.3%     169
+$indexing.py:1299 _index_to_gather                       407.91   4.3%     169
+PjitFunction(_broadcast_arrays)                          379.06   4.0%     338
+$autoencoders.py:150 preprocess_snapshot                 236.06   2.5%       1
+$core.py:682 bind                                        213.35   2.2%     926
+$core.py:731 bind_with_trace                             186.24   2.0%     925
+$core.py:1307 process_primitive                          180.43   1.9%     926
+$autoencoders.py:135 _to_flat                            176.39   1.8%       1
+$dispatch.py:81 apply_primitive                          163.21   1.7%     914
+$indexing.py:330 normalize_indices                       123.37   1.3%     169
+PjitFunction(add)                                        110.69   1.2%     674

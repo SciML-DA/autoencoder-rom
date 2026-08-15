@@ -7,9 +7,32 @@
 # Requires the `aero` Host block from hpc/ssh_config.example in ~/.ssh/config.
 set -euo pipefail
 
-REMOTE="aero"
-REMOTE_ROOT="/home/ljc124/autoencoder-rom"
-REMOTE_DATA="/home/ljc124/data"
+# Two clusters, selected with SYNC_TARGET (default aero, so existing use is
+# unchanged):
+#
+#   ./hpc/sync.sh push                 -> aero
+#   SYNC_TARGET=cx3 ./hpc/sync.sh push -> cx3
+#
+# They are separate systems with separate home directories -- nothing carries
+# over between them. On cx3 the experiment data already lives on RDS, so `data`
+# and `verify` are not needed there; only `push` is.
+case "${SYNC_TARGET:-aero}" in
+  aero)
+    REMOTE="aero"
+    REMOTE_ROOT="/home/ljc124/autoencoder-rom"
+    REMOTE_DATA="/home/ljc124/data"
+    ;;
+  cx3)
+    REMOTE="cx3"
+    REMOTE_ROOT="/rds/general/user/ljc124/home/autoencoder-rom"
+    # $EPHEMERAL is 30-day scratch; staging area for anything derived
+    REMOTE_DATA="/rds/general/user/ljc124/ephemeral/data"
+    ;;
+  *)
+    echo "unknown SYNC_TARGET '${SYNC_TARGET}' (want aero or cx3)" >&2
+    exit 1
+    ;;
+esac
 LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # rsync filter semantics differ from git's, so this list is deliberately separate
@@ -59,7 +82,8 @@ case "${1:-}" in
     ssh "${REMOTE}" 'du -sh $HOME 2>/dev/null; quota -s 2>/dev/null | tail -3'
     ;;
   *)
-    echo "usage: $0 {push|pull|data|verify <file>...|quota}" >&2
+    echo "usage: [SYNC_TARGET=aero|cx3] $0 {push|pull|data|verify <file>...|quota}" >&2
+    echo "current target: ${REMOTE} (${REMOTE_ROOT})" >&2
     exit 1
     ;;
 esac

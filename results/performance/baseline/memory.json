@@ -1,0 +1,32 @@
+[
+ {
+  "model": "AE",
+  "latent": 64,
+  "peak_mem_mb": 549.36576
+ },
+ {
+  "model": "AE",
+  "latent": 256,
+  "peak_mem_mb": 1576.8064
+ },
+ {
+  "model": "CAE",
+  "latent": 64,
+  "peak_mem_mb": 272.715264
+ },
+ {
+  "model": "AEJax",
+  "latent": 64,
+  "peak_mem_mb": 766.749696
+ },
+ {
+  "model": "AEJax",
+  "latent": 256,
+  "peak_mem_mb": 2165.015552
+ },
+ {
+  "model": "CAEJax",
+  "latent": 64,
+  "peak_mem_mb": 1839.5648
+ }
+]

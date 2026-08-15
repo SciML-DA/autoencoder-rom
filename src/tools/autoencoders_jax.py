@@ -282,6 +282,16 @@ def _epoch_batches(key, n: int, batch_size: int):
     return perm[: n_batches * batch_size].reshape(n_batches, -1)
 
 
+# `X_tr[idx]` runs *outside* jit and re-derives the same gather on every step;
+# profiling put ~530 ms in jnp's Python indexing machinery because of it. This
+# wrapper takes the whole array plus a row of the batch index and does the
+# gather inside the traced function, so it is built once at compile time.
+# Same arithmetic on the same samples in the same order.
+@partial(jax.jit, static_argnames=("cfg", "wd"))
+def train_step_at(params, opt_state, X, batches, i, lr, cfg: AEJaxConfig, wd=0.0):
+    return train_step(params, opt_state, X[batches[i]], lr, cfg, wd)
+
+
 def fit_params(data, cfg: AEJaxConfig):
     """Train on already-normalised data (N_t, n_x). Returns (params, history).
 
@@ -311,10 +321,14 @@ def fit_params(data, cfg: AEJaxConfig):
         key, shuffle_key = jax.random.split(key)
         batches = _epoch_batches(shuffle_key, X_tr.shape[0], cfg.batch_size)
 
+        # lax.scan over `batches` was tried here (one XLA call per epoch rather
+        # than one dispatch per batch) and measured inside the +-3% noise floor.
+        # With the gather already inside jit via train_step_at, the remaining
+        # per-step dispatch is cheap, so the plain loop stays.
         run = jnp.zeros((), dtype=data.dtype)  # accumulate on device
-        for idx in batches:
-            params, opt_state, loss = train_step(
-                params, opt_state, X_tr[idx], lr, cfg, cfg.weight_decay
+        for bi in range(batches.shape[0]):
+            params, opt_state, loss = train_step_at(
+                params, opt_state, X_tr, batches, bi, lr, cfg, cfg.weight_decay
             )
             run = run + loss
         history["train"].append(float(run) / batches.shape[0])  # one sync per epoch
@@ -882,6 +896,12 @@ def _eval_masked_loss(params, G, cfg: CAEJaxConfig, mask):
     return masked_mse_loss(params, G, cfg, mask)
 
 
+# same gather-inside-jit fix as train_step_at, for the conv model
+@partial(jax.jit, static_argnames=("cfg", "wd"))
+def cae_train_step_at(params, opt_state, G, batches, i, lr, cfg: CAEJaxConfig, mask, wd=0.0):
+    return cae_train_step(params, opt_state, G[batches[i]], lr, cfg, mask, wd)
+
+
 def fit_cae_params(G, cfg: CAEJaxConfig, mask):
     """Train on grid data (N_t, Nu, Nx, Ny). Returns (params, history)."""
     G = jnp.asarray(G, dtype=cfg.dtype)
@@ -904,10 +924,11 @@ def fit_cae_params(G, cfg: CAEJaxConfig, mask):
         key, shuffle_key = jax.random.split(key)
         batches = _epoch_batches(shuffle_key, G_tr.shape[0], cfg.batch_size)
 
+        # see the note in fit_params: scan measured as no gain here either
         run = jnp.zeros((), dtype=G.dtype)  # accumulate on device
-        for idx in batches:
-            params, opt_state, loss = cae_train_step(
-                params, opt_state, G_tr[idx], lr, cfg, mask, cfg.weight_decay
+        for bi in range(batches.shape[0]):
+            params, opt_state, loss = cae_train_step_at(
+                params, opt_state, G_tr, batches, bi, lr, cfg, mask, cfg.weight_decay
             )
             run = run + loss
         history["train"].append(float(run) / batches.shape[0])  # one sync per epoch
