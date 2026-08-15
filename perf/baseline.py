@@ -18,8 +18,19 @@ Two measurement rules, both learned the hard way:
   never packed onto one.
 
     python perf/baseline.py --shard 0 --nshards 3      # one GPU's worth
+<<<<<<< Updated upstream
     python perf/baseline.py --merge                    # combine + analyse
 
+=======
+    python perf/baseline.py --shard 0 --nshards 3 --pack 4   # opt-in packing
+    python perf/baseline.py --merge                    # combine + analyse
+
+`--pack` is off by default and deliberately so: it raises throughput only for
+models that leave the GPU idle (CAE 2.93x at 4 concurrent; AE 1.03x, AEJax
+0.91x), and it makes the per-config timings meaningless. Sequential for
+benchmarks, packed for grinding through a sweep.
+
+>>>>>>> Stashed changes
 Peak memory is recorded per config so the later throughput work knows how many
 runs actually fit on one card.
 """
@@ -150,6 +161,57 @@ def run(dataset: str, model: str, n_latent: int, variant: str, cache: dict) -> d
     )
 
 
+<<<<<<< Updated upstream
+=======
+def cmd_pack(a) -> None:
+    """Run this shard's configs P at a time on one GPU, instead of one by one.
+
+    Opt-in, because it is only ever a win for models that leave the GPU idle.
+    Measured aggregate throughput at 4 concurrent runs on a T4:
+
+        CAE     2.93x     overhead-bound, packs almost linearly
+        AE      1.03x     compute-bound above the knee, nothing to fill
+        AEJax   0.91x     slower packed than alone
+        CAEJax  0.97x     no gain
+
+    So `--pack 4` for conv-torch sweeps and `--pack 1` (the default, meaning
+    sequential) for everything else. Packing also invalidates per-config
+    timings -- concurrent runs contend, which scattered identical configs by
+    3.5x -- so `s_per_epoch` from a packed run is throughput bookkeeping, not a
+    benchmark. Use the sequential path for anything that needs real timings.
+    """
+    import subprocess
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    mine = configs()[a.shard :: a.nshards]
+    print(f"shard {a.shard}/{a.nshards}: {len(mine)} configs, {a.pack} at a time", flush=True)
+    env = dict(os.environ, XLA_PYTHON_CLIENT_PREALLOCATE="false")
+    for i in range(0, len(mine), a.pack):
+        group = mine[i : i + a.pack]
+        procs = [
+            subprocess.Popen(
+                [sys.executable, __file__, "--one", f"{d},{m},{k},{v}",
+                 "--dataset-out", str(OUT / f"packed_{a.shard}_{i}_{j}.csv")],
+                env=env,
+            )
+            for j, (d, m, k, v) in enumerate(group)
+        ]
+        for p in procs:
+            p.wait()
+        print(f"  [{min(i + a.pack, len(mine))}/{len(mine)}] done", flush=True)
+
+
+def cmd_one(a) -> None:
+    """Single config in its own process -- the unit cmd_pack schedules."""
+    d, m, k, v = a.one.split(",")
+    row = run(d, m, int(k), v, {})
+    with open(a.dataset_out, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerow(row)
+
+
+>>>>>>> Stashed changes
 def cmd_run(a) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     mine = configs()[a.shard :: a.nshards]
@@ -179,7 +241,11 @@ def cmd_run(a) -> None:
 
 def cmd_merge(_a) -> None:
     rows = []
+<<<<<<< Updated upstream
     for p in sorted(OUT.glob("baseline_shard*.csv")):
+=======
+    for p in sorted(list(OUT.glob("baseline_shard*.csv")) + list(OUT.glob("packed_*.csv"))):
+>>>>>>> Stashed changes
         with open(p) as f:
             rows += list(csv.DictReader(f))
     if not rows:
@@ -240,5 +306,23 @@ if __name__ == "__main__":
     p.add_argument("--shard", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)))
     p.add_argument("--nshards", type=int, default=int(os.environ.get("SLURM_ARRAY_TASK_COUNT", 1)))
     p.add_argument("--merge", action="store_true")
+<<<<<<< Updated upstream
     a = p.parse_args()
     (cmd_merge if a.merge else cmd_run)(a)
+=======
+    p.add_argument("--pack", type=int, default=1,
+                   help="concurrent runs per GPU; 1 = sequential (default). "
+                        "Only a win for CAE (2.93x at 4); AE/JAX measured "
+                        "1.03x/0.91x. Packed timings are not benchmarks.")
+    p.add_argument("--one", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--dataset-out", default=None, help=argparse.SUPPRESS)
+    a = p.parse_args()
+    if a.one:
+        cmd_one(a)
+    elif a.merge:
+        cmd_merge(a)
+    elif a.pack > 1:
+        cmd_pack(a)
+    else:
+        cmd_run(a)
+>>>>>>> Stashed changes

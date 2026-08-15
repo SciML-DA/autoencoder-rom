@@ -1,0 +1,32 @@
+#!/bin/bash
+# JAX hyperparameter sweeps, one shard per GPU (meteor has 3 T4s).
+# Sequential within a shard: packing measured 0.91-0.97x for the JAX models,
+# i.e. slower, so there is nothing to gain by running them concurrently.
+#SBATCH --job-name=sweep
+#SBATCH --partition=gpu
+#SBATCH --account=aero_research_novoa
+#SBATCH --gres=gpu:tesla_t4:1
+#SBATCH --array=0-2
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=48000MB
+#SBATCH --time=11:00:00
+#SBATCH --output=logs/%x-%A_%a.out
+#SBATCH --error=logs/%x-%A_%a.err
+
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+export MPLBACKEND=Agg
+export DATA_ROOT="$HOME/data"
+export BL_FILE="Challenge1.1_train_sub.h5"
+export BL_DOWNSAMPLE="4,4"
+# JAX grabs ~75% of the card by default, which breaks anything sharing the node
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+mkdir -p logs results/sweeps
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+
+uv run python perf/sweep.py \
+    --shard "${SLURM_ARRAY_TASK_ID}" \
+    --nshards "${SLURM_ARRAY_TASK_COUNT}"

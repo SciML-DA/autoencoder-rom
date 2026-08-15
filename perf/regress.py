@@ -144,7 +144,13 @@ def cmd_compare(args) -> None:
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("cmd", choices=["capture", "compare"])
+<<<<<<< Updated upstream
     p.add_argument("--dataset", default=os.environ.get("REGRESS_DATASET", "circle"))
+=======
+    # bl is the target dataset -- a golden captured on circle would not cover
+    # the grid shape and step count the real work runs at
+    p.add_argument("--dataset", default=os.environ.get("REGRESS_DATASET", "bl"))
+>>>>>>> Stashed changes
     p.add_argument("--margin", type=float, default=10.0, help="x noise floor")
     p.add_argument("--atol", type=float, default=1e-9)
     a = p.parse_args()

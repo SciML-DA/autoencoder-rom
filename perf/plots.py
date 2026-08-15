@@ -164,7 +164,11 @@ def fig_time_vs_params(rows, out: Path) -> None:
 
 
 def fig_time_vs_latent(rows, out: Path) -> None:
+<<<<<<< Updated upstream
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.4), sharey=False)
+=======
+    fig, axes = plt.subplots(1, 2, figsize=(15.5, 5.4), sharey=False)
+>>>>>>> Stashed changes
     for ax, fam, variants in (
         (axes[0], ("AE", "AEJax"), AE_VARIANTS),
         (axes[1], ("CAE", "CAEJax"), CAE_VARIANTS),
@@ -184,9 +188,18 @@ def fig_time_vs_latent(rows, out: Path) -> None:
         ax.set_xlabel("latent size k")
         ax.set_ylabel("s / epoch")
         ax.grid(alpha=0.3, which="both")
+<<<<<<< Updated upstream
         ax.legend(fontsize=7, ncol=2)
     axes[0].set_title(f"{DATASET}: dense AE — flat lines are fixed-width variants")
     axes[1].set_title(f"{DATASET}: conv AE — flat everywhere")
+=======
+        # outside the axes: with 10 curves per panel an inside legend covered
+        # the very lines it was labelling
+        ax.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                  borderaxespad=0, frameon=False)
+    axes[0].set_title(f"{DATASET}: dense AE — flat lines are fixed-width variants")
+    axes[1].set_title(f"{DATASET}: conv AE — weakly dependent on latent")
+>>>>>>> Stashed changes
     fig.suptitle("compute time vs latent size (latent is nearly free at fixed width)")
     fig.tight_layout(rect=(0, 0.11, 1, 1))
     fig.text(0.5, 0.012, glossary_text(), ha="center", va="bottom", fontsize=6.5)
@@ -238,6 +251,7 @@ def fig_jax_ratio(rows, out: Path) -> None:
                     ys.append(r["s_per_epoch"] / m[0]["s_per_epoch"])
             if xs:
                 ax.plot(xs, ys, marker="o", ls=ls, color=c, label=f"{ds}: {a} / {b}")
+<<<<<<< Updated upstream
     ax.axhline(1.0, color="k", lw=1)
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
@@ -250,6 +264,31 @@ def fig_jax_ratio(rows, out: Path) -> None:
     fig.text(0.5, 0.02,
              "circle CAE/CAEJax sits near 0.25: JAX is ~4x SLOWER there. Its 256x64 grid "
              "makes XLA's NCHW->NHWC transposes dominate; bl's 125x37 grid does not.",
+=======
+    ax.axhline(1.0, color="k", lw=1.2)
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log")
+    ax.set_ylim(0.2, 2.8)
+    # placed in axes coordinates: an earlier version put this at data y=1.03,
+    # where it sat under the reference line and never appeared in the render
+    ax.text(0.015, 0.97, "JAX faster", transform=ax.transAxes, fontsize=9,
+            va="top", color="0.25")
+    # bottom-right, not bottom-left: the circle CAE/CAEJax curve enters at the
+    # left edge around y=0.23 and ran straight through the label there
+    ax.text(0.985, 0.03, "torch faster", transform=ax.transAxes, fontsize=9,
+            va="bottom", ha="right", color="0.25")
+    ax.set_xlabel("latent size k")
+    ax.set_ylabel("torch s/epoch  /  JAX s/epoch")
+    ax.grid(alpha=0.3, which="both")
+    # lower left is the one empty quadrant once ylim is tightened
+    ax.legend(fontsize=8, loc="lower left", bbox_to_anchor=(0.02, 0.10))
+    ax.set_title("JAX speedup over torch (>1 = JAX faster), default width only")
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.text(0.5, 0.02,
+             "circle CAE/CAEJax sits near 0.25: JAX is ~4x SLOWER there, on a 256x64 grid vs bl's "
+             "125x37. Cause not established — a layout (NCHW vs NHWC) test measured 1.01x, so that "
+             "is ruled out; the cost is in the transposed-conv gradient.",
+>>>>>>> Stashed changes
              ha="center", fontsize=6.5, wrap=True)
     fig.savefig(out / "jax_ratio.png", dpi=140)
 
