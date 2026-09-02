@@ -1,0 +1,39 @@
+#!/bin/bash
+#PBS -N spectra
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=01:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# The frequency-domain survey: force spectra at both rates, POD coefficient
+# spectra, coherence, the band-limited ceiling and the PIV/force offset.
+#
+#   qsub hpc/spectra.pbs
+#   tail -f logs/spectra.*.live
+#
+# Run it before the big sweep, not after. It costs an hour of CPU and it decides
+# two things the sweep cannot: what --force-lag to use, and whether a broadband
+# reconstruction is worth attempting at all.
+#
+# --nperseg is the one knob that matters. Twelve inputs and too few Welch
+# segments make the multiple coherence biased towards 1, and the script says so
+# rather than quietly reporting a ceiling of zero. If it warns, halve it.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init
+
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/spectra.py \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --r-field "${R_FIELD:-16}" \
+    --nperseg "${NPERSEG:-256}" \
+    --max-lag "${MAX_LAG:-80}" \
+    --observed "${OBSERVED:-0.8281}" \
+    --out "results/spectra" \
+    $EXTRA "$@"
+
+echo
+echo "done. pull them with:  SYNC_TARGET=cx3 ./hpc/sync.sh pull"

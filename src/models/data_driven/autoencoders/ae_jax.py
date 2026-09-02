@@ -10,7 +10,7 @@ import numpy as np
 import jax, jax.numpy as jnp
 from jax.typing import DTypeLike
 
-from .autoencoders import Projector
+from . import Projector
 
 __all__ = [
     "AEJaxConfig",

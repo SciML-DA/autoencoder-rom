@@ -18,7 +18,7 @@ from datasets import (
     load_snapshots,
     prepare_split,
 )
-from tools import POD, AE, CAE, AEJax, CAEJax
+from models.data_driven.autoencoders import POD, AE, CAE, AEJax, CAEJax
 
 
 # ── dataset specs ──────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ def build_models(
 # ── helpers ────────────────────────────────────────────────────────────────────
 @contextlib.contextmanager
 def quiet(enabled: bool = True):
-    """Swallow the per-epoch prints inside tools.autoencoders_jax.fit_params."""
+    """Swallow the per-epoch prints inside models.data_driven.autoencoders.ae_jax.fit_params."""
     if not enabled:
         yield
         return

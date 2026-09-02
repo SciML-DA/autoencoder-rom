@@ -130,6 +130,81 @@ wheels = [
 ]
 
 [[package]]
+name = "autoencoder-rom"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "dynamodels" },
+    { name = "echostatenetwork", extra = ["opt"] },
+    { name = "h5py" },
+    { name = "ipykernel" },
+    { name = "ipython-genutils" },
+    { name = "ipywidgets" },
+    { name = "jax" },
+    { name = "jax", extra = ["cuda12"], marker = "python_full_version >= '3.13' and sys_platform == 'linux'" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "modulo-vki" },
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "pyqt5" },
+    { name = "pyts" },
+    { name = "requests" },
+    { name = "scipy" },
+    { name = "seaborn" },
+    { name = "tabulate" },
+    { name = "torch", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "torchaudio", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "torchaudio", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "torchvision", version = "0.17.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
+    { name = "torchvision", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "tqdm" },
+    { name = "typeguard" },
+    { name = "wandb" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dynamodels", specifier = ">=0.4.1,<1.0" },
+    { name = "echostatenetwork", extras = ["opt"], specifier = ">=0.1.2,<1.0" },
+    { name = "h5py", specifier = ">=3.14,<4.0" },
+    { name = "ipykernel", specifier = ">=6.30" },
+    { name = "ipython-genutils", specifier = ">=0.2" },
+    { name = "ipywidgets", specifier = ">=8.1" },
+    { name = "jax", marker = "python_full_version < '3.13' or sys_platform != 'linux'", specifier = ">=0.11.0" },
+    { name = "jax", extras = ["cuda12"], marker = "python_full_version >= '3.13' and sys_platform == 'linux'", specifier = ">=0.11.0" },
+    { name = "jupyter", specifier = ">=1.1" },
+    { name = "matplotlib", specifier = ">=3.9,<4.0" },
+    { name = "modulo-vki", specifier = ">=2.1" },
+    { name = "numba", specifier = "==0.64.0" },
+    { name = "numpy", specifier = ">=2.0,<3.0" },
+    { name = "pyqt5", specifier = ">=5.15" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4" },
+    { name = "pyts", specifier = ">=0.13" },
+    { name = "requests", specifier = ">=2.32" },
+    { name = "scipy", specifier = ">=1.13,<2.0" },
+    { name = "seaborn", specifier = ">=0.13" },
+    { name = "tabulate", specifier = ">=0.9" },
+    { name = "torch", specifier = ">=2.2.2" },
+    { name = "torch", marker = "python_full_version < '3.13'", specifier = ">=2.2,<2.3" },
+    { name = "torch", marker = "python_full_version >= '3.13'", specifier = ">=2.9,<2.13" },
+    { name = "torchaudio", marker = "python_full_version < '3.13'", specifier = ">=2.2,<2.3" },
+    { name = "torchaudio", marker = "python_full_version >= '3.13'", specifier = ">=2.9,<2.13" },
+    { name = "torchvision", marker = "python_full_version < '3.13'", specifier = ">=0.17,<0.18" },
+    { name = "torchvision", marker = "python_full_version >= '3.13'", specifier = ">=0.24,<0.25" },
+    { name = "tqdm", specifier = ">=4.67" },
+    { name = "typeguard" },
+    { name = "wandb" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "babel"
 version = "2.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -474,6 +549,41 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/81/e1/56027a71e31b02ddc53c7d65b01e68edf64dea2932122fe7746a516f75d5/dill-0.4.1.tar.gz", hash = "sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa", size = 187315, upload-time = "2026-01-19T02:36:56.85Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/77/dc8c558f7593132cf8fefec57c4f60c83b16941c574ac5f619abb3ae7933/dill-0.4.1-py3-none-any.whl", hash = "sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d", size = 120019, upload-time = "2026-01-19T02:36:55.663Z" },
+]
+
+[[package]]
+name = "dynamodels"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "multiprocess" },
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "typeguard" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d4/31/1df0e8946ac25b33436a32e255884f4f7fd0829b280058377ef296f1794a/dynamodels-0.4.1.tar.gz", hash = "sha256:cf55363f96a9e6bd6c3b4a745a73772d3decde2d0c023cf747b8ede1d80a2641", size = 57294, upload-time = "2026-08-18T14:05:38.49Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/70/ea/fd7f2016c9942412ec7c93b0b35581a48a4b2f25f0a98bd932ce8d6af9b0/dynamodels-0.4.1-py3-none-any.whl", hash = "sha256:db33db7e7831bd1b5aaf5e8ebed1a351446a1f9cbe72252d124256b00b37428c", size = 61192, upload-time = "2026-08-18T14:05:37.337Z" },
+]
+
+[[package]]
+name = "echostatenetwork"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/f1/c977b3b69abe1c059822c66bb8b0eb0dcefef63f57490dbed1773f166ee0/echostatenetwork-0.1.2.tar.gz", hash = "sha256:91b100d57da2d08d2fd7e6d053bd4240fd99347199d4ad767edfded5f224ee98", size = 34780, upload-time = "2026-08-14T16:48:18.986Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/b9/828af952aacdcb64ad8c200ba2a50ce0bd20cc82674b298263d83aba8f44/echostatenetwork-0.1.2-py3-none-any.whl", hash = "sha256:e47ad611fa90db16b52f2336ae803e00259ee7f39399a8ee9982c12001692268", size = 30373, upload-time = "2026-08-14T16:48:17.738Z" },
+]
+
+[package.optional-dependencies]
+opt = [
+    { name = "scikit-optimize" },
 ]
 
 [[package]]
@@ -2619,81 +2729,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/70/d8/78b1bad170f93fcf5e3536e70e8fadac55030002275c9a29e8f5719185de/pyzmq-27.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:19c9468ae0437f8074af379e986c5d3d7d7bfe033506af442e8c879732bedbe0", size = 661401, upload-time = "2025-09-08T23:08:59.802Z" },
     { url = "https://files.pythonhosted.org/packages/81/d6/4bfbb40c9a0b42fc53c7cf442f6385db70b40f74a783130c5d0a5aa62228/pyzmq-27.1.0-cp314-cp314t-win_arm64.whl", hash = "sha256:dc5dbf68a7857b59473f7df42650c621d7e8923fb03fa74a526890f4d33cc4d7", size = 575170, upload-time = "2025-09-08T23:09:01.418Z" },
 ]
-
-[[package]]
-name = "real-time-da"
-version = "2.3.0"
-source = { editable = "." }
-dependencies = [
-    { name = "h5py" },
-    { name = "ipykernel" },
-    { name = "ipython-genutils" },
-    { name = "ipywidgets" },
-    { name = "jax" },
-    { name = "jax", extra = ["cuda12"], marker = "python_full_version >= '3.13' and sys_platform == 'linux'" },
-    { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "modulo-vki" },
-    { name = "multiprocess" },
-    { name = "numba" },
-    { name = "numpy" },
-    { name = "pyqt5" },
-    { name = "pyts" },
-    { name = "requests" },
-    { name = "scikit-optimize" },
-    { name = "scipy" },
-    { name = "seaborn" },
-    { name = "tabulate" },
-    { name = "torch", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
-    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
-    { name = "torchaudio", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
-    { name = "torchaudio", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
-    { name = "torchvision", version = "0.17.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
-    { name = "torchvision", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
-    { name = "tqdm" },
-    { name = "typeguard" },
-    { name = "wandb" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "h5py", specifier = ">=3.14,<4.0" },
-    { name = "ipykernel", specifier = ">=6.30" },
-    { name = "ipython-genutils", specifier = ">=0.2" },
-    { name = "ipywidgets", specifier = ">=8.1" },
-    { name = "jax", marker = "python_full_version < '3.13' or sys_platform != 'linux'", specifier = ">=0.11.0" },
-    { name = "jax", extras = ["cuda12"], marker = "python_full_version >= '3.13' and sys_platform == 'linux'", specifier = ">=0.11.0" },
-    { name = "jupyter", specifier = ">=1.1" },
-    { name = "matplotlib", specifier = ">=3.9,<4.0" },
-    { name = "modulo-vki", specifier = ">=2.1" },
-    { name = "multiprocess", specifier = ">=0.70" },
-    { name = "numba", specifier = "==0.64.0" },
-    { name = "numpy", specifier = ">=2.0,<3.0" },
-    { name = "pyqt5", specifier = ">=5.15" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4" },
-    { name = "pyts", specifier = ">=0.13" },
-    { name = "requests", specifier = ">=2.32" },
-    { name = "scikit-optimize", specifier = ">=0.10" },
-    { name = "scipy", specifier = ">=1.13,<2.0" },
-    { name = "seaborn", specifier = ">=0.13" },
-    { name = "tabulate", specifier = ">=0.9" },
-    { name = "torch", specifier = ">=2.2.2" },
-    { name = "torch", marker = "python_full_version < '3.13'", specifier = ">=2.2,<2.3" },
-    { name = "torch", marker = "python_full_version >= '3.13'", specifier = ">=2.9,<2.13" },
-    { name = "torchaudio", marker = "python_full_version < '3.13'", specifier = ">=2.2,<2.3" },
-    { name = "torchaudio", marker = "python_full_version >= '3.13'", specifier = ">=2.9,<2.13" },
-    { name = "torchvision", marker = "python_full_version < '3.13'", specifier = ">=0.17,<0.18" },
-    { name = "torchvision", marker = "python_full_version >= '3.13'", specifier = ">=0.24,<0.25" },
-    { name = "tqdm", specifier = ">=4.67" },
-    { name = "typeguard" },
-    { name = "wandb" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "referencing"

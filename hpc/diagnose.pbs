@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -N diagnose
+#PBS -l select=1:ncpus=8:mem=24gb
+#PBS -l walltime=03:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# Why the sweep plateaus at NMSE ~0.83. CPU only -- every check here is linear
+# algebra and a lag scan, and the GPU queue is not worth waiting for.
+#
+#   qsub hpc/diagnose.pbs
+#   tail -f logs/diagnose.*.live
+#
+# Walltime is 3 h, not 1: --lag-step 1 --max-lag 80 is 161 PODLSE refits, and
+# job 3936955 was killed at 3618 s doing exactly that on one BLAS thread. With
+# hpc/lib.sh now taking the cpuset rather than a mis-reported NCPUS=1 it should
+# finish in well under an hour, but the scan is the point of the job and there
+# is no reason to have it die at the wire again.
+#
+# The lag scan is the one that matters and it is deliberately fine here: the
+# previous run found its optimum at -25 samples with a step of 5, sitting exactly
+# on the edge of the 25-sample causal window, which is the signature of an
+# offset the embedding cannot reach rather than of a resolved lag.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init
+
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/diagnose_sensors.py \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --r-field "${R_FIELD:-64}" \
+    --n-delays "${N_DELAYS:-25}" \
+    --max-lag "${MAX_LAG:-80}" \
+    --lag-step "${LAG_STEP:-1}" \
+    --observed "${OBSERVED:-0.8281}" \
+    --out "results/diagnosis" \
+    $EXTRA "$@"

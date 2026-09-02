@@ -1,0 +1,37 @@
+#!/bin/bash
+#PBS -N verify
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=00:30:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# The verification suite plus the RDS survey. Run this FIRST on cx3, before any
+# study job -- it is thirty minutes that saves you from discovering a pairing or
+# transpose bug after an eight-hour GPU job.
+#
+#   qsub hpc/verify.pbs
+#
+# No GPU: everything here is small, and the CPU-only path is the one that has to
+# work anyway for the linear baselines.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init
+
+echo
+echo "=== the environment this job actually got ==="
+# Advisory here, not fatal. check_threads.py exits non-zero on a mismatch so
+# that ./hpc/preflight.sh can gate on it, but under `set -e` that would abort
+# this job before the tests ever run -- and a BLAS reporting an unexpected
+# thread count is something to read and act on, not a reason to throw away the
+# other twenty-nine minutes of checks.
+uv run python scripts/check_threads.py || echo "  (see above -- not fatal here)"
+
+echo
+echo "=== self-contained checks (no RDS) ==="
+VERIFY_SLOW=1 uv run python -m pytest tests/ -q
+
+echo
+echo "=== the real data on RDS ==="
+uv run python scripts/inspect_experiment.py

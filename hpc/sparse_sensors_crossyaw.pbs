@@ -1,0 +1,81 @@
+#!/bin/bash
+#PBS -N sparse_xyaw
+#PBS -J 0-4
+#PBS -l select=1:ncpus=16:mem=192gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=24:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+# PBS runs a job script under your *login* shell unless told otherwise, and the
+# live-log line below uses process substitution, which is a bash feature. Naming
+# the interpreter explicitly means this does not depend on what your account
+# happens to be set to.
+
+# Held-out-yaw generalisation, as a PBS array job: one held-out run per index.
+#
+#   qsub hpc/sparse_sensors_crossyaw.pbs
+#   qsub -J 0-4 -v N=3000 hpc/sparse_sensors_crossyaw.pbs      # subsample first
+#
+# This is the test that actually matters, and the reason five runs exist. An
+# in-time split measures whether the model generalises to *later* snapshots of
+# the same flow -- which, at 250 Hz with a 100-sample guard band, is not a very
+# demanding question. Holding out a whole yaw setting asks whether it generalises
+# to a flow it has never seen, and that is what a deployed nowcaster faces.
+#
+# Expect it to be much worse than the in-time split. Quote both.
+#
+# Memory: five runs concatenated is (31258, 30425) -- 7.6 GB in float64 for Q,
+# 3.8 GB for the raw grids, plus POD workspaces. 192 GB has headroom for the
+# randomized solver; drop to 128 GB with --n to subsample if the queue is long.
+#
+# The array indices must line up with datasets.wake_experiment.RUNS. If that
+# tuple changes, this changes.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+
+# Cap the BLAS threads on a GPU job. The training loop is on the device and the
+# host side is dataloading and the occasional POD; a dozen OpenMP threads
+# fighting over the same cores makes both slower.
+hpc_init 4
+hpc_gpu
+
+RUNS=(
+    4p5d_10ms_yaw_0_0_0
+    4p5d_10ms_yaw_20_10_0
+    4p5d_10ms_yaw_-20_-10_0
+    4p5d_10ms_yaw_30_15_0
+    4p5d_10ms_yaw_-30_-15_0
+)
+HELD="${RUNS[$PBS_ARRAY_INDEX]}"
+
+echo "array idx : $PBS_ARRAY_INDEX"
+echo "holding out: $HELD"
+
+# Every array element appends to its own results.csv under its own tag. Merge
+# them afterwards rather than writing to one file: five jobs appending to the
+# same CSV interleave their rows mid-line and there is no lock.
+# Extra flags, passed through with `qsub -v EXTRA="..."`.
+#
+# PBS does not forward command-line arguments to a job script the way sbatch
+# does, and `qsub -- script args` makes PBS run the file as a bare executable
+# without reading its #PBS directives, so the job silently lands on the queue
+# defaults. $EXTRA is the PBS-native route. It is deliberately unquoted below so
+# it word-splits into separate arguments; keep each flag and value simple.
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/sparse_sensor_study.py \
+    --runs "${RUNS[@]}" \
+    --cross-yaw "$HELD" \
+    --tag "xyaw_$HELD" \
+    --r-field "${R_FIELD:-64}" \
+    --delays ${DELAYS:-1 25} \
+    --force-lag "${FORCE_LAG:-0}" \
+    --latents ${LATENTS:-pod ae} \
+    --branches ${BRANCHES:-linear mlp gru} \
+    --epochs "${EPOCHS:-500}" \
+    --ae-epochs "${AE_EPOCHS:-400}" \
+    ${N:+--n $N} \
+    $EXTRA "$@"
+
+echo "done. results in results/sparse_sensors/xyaw_$HELD/"

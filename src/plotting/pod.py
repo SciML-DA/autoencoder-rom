@@ -3,7 +3,7 @@
 
 # ── plots ─────────────────────────────────────────────────────────────────
 
-from tools.autoencoders import POD
+from models.data_driven.autoencoders import POD
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import matplotlib.colors as colors

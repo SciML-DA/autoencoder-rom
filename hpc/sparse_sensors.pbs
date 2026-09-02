@@ -1,0 +1,69 @@
+#!/bin/bash
+#PBS -N sparse_sensors
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=08:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+# PBS runs a job script under your *login* shell unless told otherwise, and the
+# live-log line below uses process substitution, which is a bash feature. Naming
+# the interpreter explicitly means this does not depend on what your account
+# happens to be set to.
+
+# Sparse-sensor reconstruction study on cx3 (PBS, not Slurm -- cx3 and Aero are
+# separate systems and nothing carries over between them).
+#
+#   qsub hpc/sparse_sensors.pbs
+#   qsub -v RUN=4p5d_10ms_yaw_30_15_0,TAG=yaw30 hpc/sparse_sensors.pbs
+#   qsub -v LATENTS="pod ae cae",EPOCHS=600 hpc/sparse_sensors.pbs
+#
+# GPU type: L40S (48 GB) is what the other GPU jobs in hpc/ ask for, and it fits everything here --
+# the field tensor is ~760 MB in float32 and the dense AE is ~32M parameters.
+# Swap to gpu_type=RTX6000 (24 GB) if the L40S queue is long -- everything
+# except the CAE fits there too. The CAE is the only model
+# that gets near the limit, because it holds the full grid rather than the
+# masked columns.
+#
+# Memory: 64 GB is for the *host* side. Q is (31258, 6085) in float64 = 1.5 GB,
+# the raw grid another 0.8 GB in float32, and the randomized POD needs a couple
+# of workspaces of the same order. Use the cross-yaw script for anything that
+# concatenates runs -- five of them will not fit here.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+
+# Cap the BLAS threads on a GPU job. The training loop is on the device and the
+# host side is dataloading and the occasional POD; a dozen OpenMP threads
+# fighting over the same cores makes both slower.
+hpc_init 4
+hpc_gpu
+
+RUN="${RUN:-4p5d_10ms_yaw_0_0_0}"
+TAG="${TAG:-$RUN}"
+R_FIELD="${R_FIELD:-64}"
+DELAYS="${DELAYS:-1 5 25 50}"
+LATENTS="${LATENTS:-pod ae}"
+BRANCHES="${BRANCHES:-linear mlp cnn gru}"
+EPOCHS="${EPOCHS:-500}"
+AE_EPOCHS="${AE_EPOCHS:-400}"
+FORCE_LAG="${FORCE_LAG:-0}"
+EXTRA="${EXTRA:-}"
+
+echo "run       : $RUN"
+
+uv run python scripts/sparse_sensor_study.py \
+    --run "$RUN" \
+    --tag "$TAG" \
+    --r-field "$R_FIELD" \
+    --delays $DELAYS \
+    --force-lag "$FORCE_LAG" \
+    --latents $LATENTS \
+    --branches $BRANCHES \
+    --epochs "$EPOCHS" \
+    --ae-epochs "$AE_EPOCHS" \
+    --ridge-cv \
+    --forecast \
+    --save-arrays \
+    $EXTRA "$@"
+
+echo "done. results in results/sparse_sensors/$TAG/"

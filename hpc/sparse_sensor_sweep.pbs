@@ -1,0 +1,98 @@
+#!/bin/bash
+#PBS -N sweep
+#PBS -l select=1:ncpus=8:mem=96gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=24:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+# PBS runs a job script under your *login* shell unless told otherwise, and the
+# live-log line below uses process substitution, which is a bash feature. Naming
+# the interpreter explicitly means this does not depend on what your account
+# happens to be set to.
+
+# The convergence study for sparse-sensor reconstruction.
+#
+#   qsub hpc/sparse_sensor_sweep.pbs
+#   qsub -v STAGES="A B",TAG=quicklook hpc/sparse_sensor_sweep.pbs
+#   qsub -v LATENTS="pod ae cae",WALL=48 hpc/sparse_sensor_sweep.pbs
+#
+# **This job is resumable.** The CSV is appended row by row and read back on
+# startup, and fitted autoencoders are cached to disk, so a job killed at
+# walltime picks up where it stopped. If it does not finish, just resubmit the
+# same command -- or chain it in advance:
+#
+#   ./hpc/qsub_chain.sh 3 hpc/sparse_sensor_sweep.pbs
+#
+# Rough cost at the real problem size (6085 snapshots, 31258 rows):
+#
+#   loading 6085 .npz off RDS       5-15 min   metadata-bound, not bandwidth
+#   POD at r=128 (randomized)        1-2 min   done once, sliced for every r
+#   stage A, --latents pod ae        2-4 h     12 autoencoder fits, the bulk
+#   stages B and C                   <1 h      reuse the baseline autoencoder
+#   stage D, 5 seeds                 2-4 h     10 more autoencoder fits
+#   ---------------------------------------
+#   total, pod+ae                    6-10 h    fits in one 24 h job
+#   adding cae                       20 h+     give it its own job, or chain
+#
+# So: start with the default LATENTS="pod ae". Add cae once you know the dense
+# curve, in a separate submission with the same TAG -- the cache and the CSV are
+# shared, so it only fits what is missing.
+#
+# Memory is for the host: Q is (31258, 6085) float64 = 1.5 GB, the rebuilt grid
+# for an autoencoder fit is another 1.2 GB in float32, and the video pack holds
+# a few predictions at ~40 MB each. 96 GB has comfortable headroom.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+
+# Cap the BLAS threads on a GPU job. The training loop is on the device and the
+# host side is dataloading and the occasional POD; a dozen OpenMP threads
+# fighting over the same cores makes both slower.
+hpc_init 4
+hpc_gpu
+
+RUN="${RUN:-4p5d_10ms_yaw_0_0_0}"
+TAG="${TAG:-main}"
+# R is the sensor-rank convergence -- without it the job sweeps latent
+# size, delays and channels but never the rank that had not saturated.
+STAGES="${STAGES:-A B C D R}"
+LATENTS="${LATENTS:-pod ae}"
+BRANCHES="${BRANCHES:-linear mlp cnn gru}"
+# Autoencoder checkpoints go to $EPHEMERAL, not into results/. They are large,
+# regenerable, and $HOME is quota'd while $EPHEMERAL (30-day scratch) is not.
+# Keeping them out of results/ also keeps `sync.sh pull` down to megabytes.
+# They survive between jobs, which is the whole point -- a chained resubmission
+# reloads instead of retraining.
+CACHE_DIR="${CACHE_DIR:-${EPHEMERAL:-$HOME}/ae_cache/${TAG}}"
+mkdir -p "$CACHE_DIR"
+
+LATENTS_SWEEP="${LATENTS_SWEEP:-4 8 16 32 64 128}"
+DELAYS_SWEEP="${DELAYS_SWEEP:-1 2 5 10 25 50 100}"
+# stage R knobs, previously reachable only through $EXTRA
+RANK_SWEEP="${RANK_SWEEP:-2 3 4 6 8}"
+R_SENSOR_SWEEP="${R_SENSOR_SWEEP:-12 25 50 100 200 300}"
+EXTRA="${EXTRA:-}"
+
+echo "run    : $RUN"
+echo "tag    : $TAG"
+echo "stages : $STAGES"
+echo "r_sensor: $R_SENSOR_SWEEP"
+echo "cache  : $CACHE_DIR"
+
+uv run python scripts/sparse_sensor_sweep.py \
+    --run "$RUN" \
+    --tag "$TAG" \
+    --stages $STAGES \
+    --latents $LATENTS \
+    --branches $BRANCHES \
+    --latents-sweep $LATENTS_SWEEP \
+    --delays-sweep $DELAYS_SWEEP \
+    --rank-sweep $RANK_SWEEP \
+    --r-sensor-sweep $R_SENSOR_SWEEP \
+    --force-lag "${FORCE_LAG:-0}" \
+    --cache-dir "$CACHE_DIR" \
+    $EXTRA "$@"
+
+echo
+echo "done. results in results/sparse_sweep/$TAG/"
+echo "pull them with:  SYNC_TARGET=cx3 ./hpc/sync.sh pull"

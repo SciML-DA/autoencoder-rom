@@ -2,19 +2,33 @@
 #PBS -N convergence
 #PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=08:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# The latent-dimension convergence study on the Challenge1.1 snapshots: every
+# reduction family at every latent size, one dataset.
+#
+#   qsub hpc/convergence.pbs
+#
+# This is the *other* convergence study -- it answers "how far does a nonlinear
+# encoder beat a linear one at fixed latent size" on clean simulation data. The
+# sparse-sensor convergence study is hpc/sparse_sensor_sweep.pbs and shares
+# nothing with it but the word.
 
 set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
 
-export PATH="$HOME/.local/bin:$PATH"
-export MPLBACKEND=Agg
-
-cd "$PBS_O_WORKDIR"
+# Cap the BLAS threads: the work is on the GPU and the host side is dataloading.
+hpc_init 4
+hpc_gpu
 
 # Stage the 34 GB training file onto node-local disk. Reading it repeatedly
-# straight off the RDS is the usual reason these jobs crawl.
+# straight off the RDS is the usual reason these jobs crawl. Unlike the
+# sparse-sensor jobs, this one re-reads every epoch, so the copy pays for itself.
 cp "$EPHEMERAL/data/Challenge1.1_train.h5" "$TMPDIR/"
 export DATA_ROOT="$TMPDIR"
 
-# convergence_study.py writes to `results/convergence` relative to cwd, which is
-# $PBS_O_WORKDIR — already permanent storage, so nothing to copy back.
-uv run python scripts/convergence_study.py
+# convergence_study.py writes to results/convergence relative to cwd, which is
+# $PBS_O_WORKDIR -- already permanent storage, so nothing to copy back.
+uv run python scripts/convergence_study.py "$@"

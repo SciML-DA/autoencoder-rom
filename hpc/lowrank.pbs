@@ -1,0 +1,37 @@
+#!/bin/bash
+#PBS -N lowrank
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=04:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# Stage R: tune the linear estimator at the ranks the sensors resolve.
+#
+# The diagnostic put the linear ceiling at NMSE 0.757 against 0.828 achieved,
+# with 3 of 64 field modes observable. Stage A swept r_field to 128, where
+# everything above ~4 fits noise. This sweeps 2..8 against r_sensor and ridge.
+#
+# CPU only: every fit is a closed-form solve on a rank <= 8 basis.
+#
+# Do NOT add --notch here. Notching 14-17 Hz halved the observability; that band
+# is wake meandering (St ~ 0.075), not rig resonance. See
+# results/diagnosis/notch_rejected.log.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init
+
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/sparse_sensor_sweep.py \
+    --stages R \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --n-delays "${N_DELAYS:-25}" \
+    --force-lag "${FORCE_LAG:-0}" \
+    --latents pod \
+    --branches linear mlp gru \
+    --device cpu \
+    --out results/sparse_sweep \
+    --tag "${TAG:-lowrank}" \
+    $EXTRA "$@"

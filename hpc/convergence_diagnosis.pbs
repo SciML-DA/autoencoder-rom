@@ -1,0 +1,54 @@
+#!/bin/bash
+#PBS -N convdiag
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=06:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# Is the branched network under-fitting, or at the information limit?
+#
+#   qsub hpc/convergence_diagnosis.pbs
+#   tail -f logs/convdiag.*.live
+#
+# Answers the one question that makes every architecture comparison in the
+# sweeps interpretable or not: pod+linear scored 0.7722 where the closed-form
+# PODLSE over the identical model class scored 0.7507. Either training is not
+# reaching its own optimum -- in which case the flat sweep is an artefact -- or
+# the gap is the trainer's validation holdout, which is a data-budget
+# difference rather than a modelling one.
+#
+# GPU, because the epoch grid goes to 1600 and the performance table trains
+# eight networks. The closed-form references are CPU and take seconds.
+#
+# DELAY_AHEAD defaults to 0 -- strictly causal, past and present samples only.
+# That is the configuration a real-time estimator could actually run, so it is
+# the one the headline numbers should describe. Setting it to K lets the
+# estimator see K sensor samples *after* the instant it reconstructs, which is
+# legitimate for post-hoc reconstruction, and is realisable in real time as
+# fixed-lag smoothing at a latency of K/250 s -- but it is a different claim
+# and has to be quoted as one. hpc/latency_sweep.pbs measures the trade.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init 4
+hpc_gpu
+
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/convergence_diagnosis.py \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --tag "${TAG:-default}" \
+    --r-field "${R_FIELD:-16}" \
+    --n-delays "${N_DELAYS:-25}" \
+    --delay-ahead "${DELAY_AHEAD:-0}" \
+    --epoch-grid ${EPOCH_GRID:-50 100 200 400 800 1600} \
+    --val-fractions ${VAL_FRACTIONS:-0.2 0.0} \
+    --branches ${BRANCHES:-linear mlp cnn gru} \
+    --latents ${LATENTS:-pod ae} \
+    --out results/convergence_diagnosis \
+    $EXTRA "$@"
+
+echo
+echo "done. results in results/convergence_diagnosis/${TAG:-default}/"
+echo "pull them with:  SYNC_TARGET=cx3 ./hpc/sync.sh pull"

@@ -1,11 +1,21 @@
-from ..model import Model
-from tools.esn_core import EchoStateNetwork
+from dynamodels import Model
+from echostatenetwork import EchoStateNetwork
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as sla
-from ..integrator import DiscreteIntegrator
+from dynamodels import DiscreteIntegrator
 
 import inspect
+
+
+def phi_to_esn_layout(Z):
+    """``(N_latent, N_t)`` latent coefficients (a projector's ``encode()`` output,
+    or POD's ``Phi``) -> the ``(L, N_t, N_latent)`` layout `ESN_model` expects as
+    ``data``; a 3-D input is taken as ``(L, N_latent, N_t)`` segments."""
+    Z = np.asarray(Z)
+    if Z.ndim == 2:
+        Z = Z[np.newaxis, ...]  # (1, N_latent, N_t)
+    return Z.transpose(0, 2, 1)  # (L, N_t, N_latent)
 
 
 class ESN_model(EchoStateNetwork, Model):
@@ -183,7 +193,7 @@ class ESN_model(EchoStateNetwork, Model):
             else:
                 raise ValueError(f"Key {key} not in ESN_model class")
 
-        if self.ensemble:
+        if self.ensemble_cfg:
             est_alpha = self.est_alpha.copy()
             # If Wout is being estimated, we need to update the est_alpha list to include the SVD components
             # and remove Wout. We do not directly estimate Wout, but rather its singular values.
@@ -328,8 +338,8 @@ class ESN_model(EchoStateNetwork, Model):
 
     @property
     def N_ens(self):
-        if isinstance(self.ensemble, dict):
-            return self.ensemble.get("m")
+        if isinstance(self.ensemble_cfg, dict):
+            return self.ensemble_cfg.get("m")
         else:
             return self.current_state.shape[-1]
 
@@ -371,6 +381,20 @@ class ESN_model(EchoStateNetwork, Model):
 
         # Set physical and reservoir states as ensembles
         return self.build_psi(u=u_init, r=r_init)
+
+    @property
+    def forecaster_state_labels(self):
+        """Labels for the reservoir block of ``psi``. `LatentROMMixin` asks each
+        forecaster for these rather than assuming a single block, because an
+        LSTM contributes two (see `LSTM_model`)."""
+        if not self.update_reservoir:
+            return []
+        return [f"$r_{j+1}$" for j in np.arange(self.N_units)]
+
+    def reset_forecaster(self, *args, **kwargs):
+        """Forecaster-neutral name for `reset_ESN`, used by
+        `LatentROMMixin.reset_case`."""
+        return self.reset_ESN(*args, **kwargs)
 
     def reset_ESN(self, data, u0=None, plot_training=False, **kwargs):
 

@@ -14,14 +14,12 @@ data/
 results/**
 !results/**/
 !results/**/results.csv
-<<<<<<< Updated upstream
-=======
+# every results folder carries a README saying which job produced it
+!results/**/README.md
 # performance baselines are the reference every optimisation is measured
 # against, so their figures are tracked too, not just the csv
 !results/performance/**/*.png
 !results/performance/**/*.json
-!results/performance/**/README.md
->>>>>>> Stashed changes
 wandb/
 *.o[0-9]*
 *.e[0-9]*
@@ -30,3 +28,6 @@ wandb/
 .vscode/
 .ruff_cache/
 
+
+# job logs, pulled from the cluster by `sync.sh pull` -- read them, do not commit them
+logs/

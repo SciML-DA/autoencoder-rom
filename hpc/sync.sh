@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sync code up / results down between laptop and the Aero Linux environment.
-#   ./hpc/sync.sh push      code -> aero
-#   ./hpc/sync.sh pull      results -> laptop
+#   ./hpc/sync.sh push        code -> aero
+#   ./hpc/sync.sh pull        results -> laptop (skips the autoencoder cache)
+#   ./hpc/sync.sh pull-videos just video packs and animations
 #   ./hpc/sync.sh data      one-time upload of data/ (resumable)
 #   ./hpc/sync.sh quota     check home usage against the 100 GB soft quota
 # Requires the `aero` Host block from hpc/ssh_config.example in ~/.ssh/config.
@@ -56,7 +57,34 @@ case "${1:-}" in
     rsync -rvlt -hP "${EXCLUDES[@]}" "${LOCAL_ROOT}/" "${REMOTE}:${REMOTE_ROOT}/"
     ;;
   pull)
-    rsync -rvlt -hP "${REMOTE}:${REMOTE_ROOT}/results/" "${LOCAL_ROOT}/results/"
+    # `cache/` holds fitted-autoencoder checkpoints, which are large,
+    # regenerable and useless off the cluster -- a full sweep leaves several GB
+    # of them. `--dry-run` first if you want to see what is coming.
+    rsync -rvlt -hP --exclude 'cache/' \
+        "${REMOTE}:${REMOTE_ROOT}/results/" "${LOCAL_ROOT}/results/"
+    # Job logs come down too. They are a few hundred KB of text against
+    # gigabytes of results, and they are the only record of *why* a run came out
+    # the way it did -- which config it was actually given, which warnings fired,
+    # where it died. A results tree with no logs is a set of numbers you cannot
+    # interrogate. Note `logs/` stays in EXCLUDES above, so this is one-way:
+    # down from the cluster, never up, and a push can never clobber them.
+    rsync -rvlt -hP "${REMOTE}:${REMOTE_ROOT}/logs/" "${LOCAL_ROOT}/logs/"
+    ;;
+  pull-logs)
+    # Just the logs, for when a job is still running and you want to read the
+    # live tee without waiting for the results. Safe mid-run: rsync copies
+    # whatever has been flushed so far.
+    rsync -rvlt -hP "${REMOTE}:${REMOTE_ROOT}/logs/" "${LOCAL_ROOT}/logs/"
+    ;;
+  pull-videos)
+    # Just the video packs and rendered animations. A few tens of MB against
+    # potentially gigabytes for the whole results tree, so this is the one to
+    # use over a slow connection when all you want is the footage.
+    rsync -rvlt -hP --prune-empty-dirs \
+        --include '*/' \
+        --include 'video_pack.npz' --include '*.mp4' --include '*.gif' \
+        --exclude '*' \
+        "${REMOTE}:${REMOTE_ROOT}/results/" "${LOCAL_ROOT}/results/"
     ;;
   data)
     # macOS ships openrsync (2.6.9-compatible), which has --append but NOT
@@ -82,7 +110,7 @@ case "${1:-}" in
     ssh "${REMOTE}" 'du -sh $HOME 2>/dev/null; quota -s 2>/dev/null | tail -3'
     ;;
   *)
-    echo "usage: [SYNC_TARGET=aero|cx3] $0 {push|pull|data|verify <file>...|quota}" >&2
+    echo "usage: [SYNC_TARGET=aero|cx3] $0 {push|pull|pull-logs|pull-videos|data|verify <file>...|quota}" >&2
     echo "current target: ${REMOTE} (${REMOTE_ROOT})" >&2
     exit 1
     ;;
