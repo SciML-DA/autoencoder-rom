@@ -105,7 +105,7 @@ def test_both_forecasters_satisfy_the_protocol():
     written independently of it both already satisfy it."""
     from echostatenetwork import EchoStateNetwork
 
-    from models.data_driven.lstm_core import LSTM
+    from models.data_driven.forecasters import LSTM
 
     required = ("train", "step", "normalize_input", "compute_nRMSE", "copy",
                 "trained", "N_wash", "norm", "shift", "norm_method")

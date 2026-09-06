@@ -166,9 +166,7 @@ class AE(Projector):
     # ── data helpers ──────────────────────────────────────────────────────────
 
     def _to_torch(self, Q: np.ndarray) -> torch.Tensor:
-        return torch.as_tensor(
-            (Q / self._scale).T, dtype=torch.float32, device=self.device
-        )
+        return torch.as_tensor((Q / self._scale).T, dtype=torch.float32, device=self.device)
 
     def _from_torch(self, T: torch.Tensor) -> np.ndarray:
         return T.detach().cpu().numpy().T * self._scale
@@ -257,9 +255,7 @@ class AE(Projector):
 
     @property
     def n_params(self) -> int:
-        return sum(
-            q.numel() for net in (self.encoder, self.decoder) for q in net.parameters()
-        )
+        return sum(q.numel() for net in (self.encoder, self.decoder) for q in net.parameters())
 
     def encode(self, X: np.ndarray) -> np.ndarray:
         Q = self.preprocess_snapshot(X)
@@ -402,9 +398,7 @@ class CAE(Projector):
                     f"grid {nx}x{ny} not invertible with k={k},s={s},p={p}; "
                     f"got output_padding ({op_w},{op_h}). Pad the grid to even dims."
                 )
-            dec.append(
-                nn.ConvTranspose2d(c, c_out, k, s, p, output_padding=(op_w, op_h))
-            )
+            dec.append(nn.ConvTranspose2d(c, c_out, k, s, p, output_padding=(op_w, op_h)))
             if i < len(dec_out) - 1:  # final conv stays linear
                 dec.append(act())
             c, w, h = c_out, tw, th
@@ -450,9 +444,7 @@ class CAE(Projector):
             self.fluid_mask_flat.reshape(Nx, Ny),
             dtype=torch.float32,
             device=self.device,
-        )[
-            None, None
-        ]  # (1,1,Nx,Ny)
+        )[None, None]  # (1,1,Nx,Ny)
 
         n_t = data.shape[0]
         n_val = int(round(self.val_fraction * n_t))
@@ -482,9 +474,7 @@ class CAE(Projector):
             # divide by Nu too: the sum runs over the field channels, so without
             # it this is Nu x a true mean and the CAE curves sit a constant
             # factor above the AE ones for no physical reason
-            return ((recon - target) ** 2 * mask).sum() / (
-                mask.sum() * target.shape[0] * Nu
-            )
+            return ((recon - target) ** 2 * mask).sum() / (mask.sum() * target.shape[0] * Nu)
 
         best_val, wait = float("inf"), 0
         best_state = _alloc_snapshot(tuple(self._networks()))
@@ -519,9 +509,7 @@ class CAE(Projector):
                 for net in self._networks():
                     net.eval()
                 with torch.no_grad():
-                    v = masked_mse(
-                        self._decode_grid(self._encode_grid(X_val)), X_val
-                    ).item()
+                    v = masked_mse(self._decode_grid(self._encode_grid(X_val)), X_val).item()
                 self.val_loss_history.append(v)
                 sched.step(v)
                 if v < best_val * (1.0 - self.threshold):
@@ -545,9 +533,7 @@ class CAE(Projector):
 
     def encode(self, X: np.ndarray) -> np.ndarray:
         Q = self.preprocess_snapshot(X)
-        G = torch.as_tensor(
-            self._flat_to_grid(Q / self._scale), dtype=torch.float32, device=self.device
-        )
+        G = torch.as_tensor(self._flat_to_grid(Q / self._scale), dtype=torch.float32, device=self.device)
         for net in self._networks():
             net.eval()
         with torch.no_grad():

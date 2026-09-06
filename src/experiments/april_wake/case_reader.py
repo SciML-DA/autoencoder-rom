@@ -32,7 +32,7 @@ the 5.7384 px/mm calibration instead, and `check_scaling` cross-checks the two.
 
 Typical usage:
 
-    from datasets.wake_experiment import build_case
+    from experiments.april_wake.case_reader import build_case
 
     case = build_case("4p5d_10ms_yaw_0_0_0", n_snapshots=2000)
     Q, S = case.flat(), case.S     # (N_x, N_t) and (N_s, N_t)
@@ -524,7 +524,7 @@ def read_dat(path: str, n_channels: int = N_FORCE_CHANNELS) -> np.ndarray:
 
     Returns:
         The record, shape (n_channels, n_samples), matching the (N_s, N_t)
-        convention used by `tools.epod`.
+        convention used by `field_estimation.epod`.
 
     Raises:
         ValueError: If the file is empty, or if its length is not divisible by
@@ -868,7 +868,7 @@ class Case:
 
     `X` holds the repository's (Nu, Nt, Nx, Ny) layout with NaN at invalid
     vectors, as the `Projector` classes expect. `flat` produces the (N_x, N_t)
-    column-per-snapshot matrix `tools.epod` expects, under the same masking
+    column-per-snapshot matrix `field_estimation.epod` expects, under the same masking
     convention, so linear and neural models fit on identical data.
 
     Invalid points are dropped rather than zero-filled. The reference notebook

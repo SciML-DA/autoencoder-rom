@@ -1,11 +1,10 @@
 from typing import Optional
 
-from .autoencoders import POD
-from .esn import ESN_model
-from .latent_rom import LatentROMMixin, SensorPlacementMixin
+from ..autoencoders import POD
+from ..forecasters import ESN_model
+from ..latent_rom import LatentROMMixin, SensorPlacementMixin
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import add_pdf_page, plt_pdf
 
 
 class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
@@ -113,6 +112,8 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
             POD_ESN.plot_case(case=self, num_modes=self.N_modes, datasets=datasets)
 
             if pdf_file is not None:
+                from plotting.figures import add_pdf_page, plt_pdf
+
                 self.pdf_file = pdf_file
                 if isinstance(self.pdf_file, str):
                     self.pdf_file = plt_pdf.PdfPages(f"{self.pdf_file}.pdf")

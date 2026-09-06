@@ -20,13 +20,12 @@ import types
 import numpy as np
 import pytest
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from datasets.sparse_sensors import make_split  # noqa: E402
+from experiments.april_wake.data_preprocessing import make_split  # noqa: E402
 
-N = 600          # snapshots per run
-WARMUP = 24      # (n_delays - 1) * stride for the defaults below
+N = 600  # snapshots per run
+WARMUP = 24  # (n_delays - 1) * stride for the defaults below
 
 
 class _Case:
@@ -37,8 +36,7 @@ class _Case:
 
 
 def _args(**kw):
-    a = types.SimpleNamespace(delays=[25], delay_stride=1, delay_ahead=0,
-                              gap=100, test_fraction=0.25, cross_yaw=None)
+    a = types.SimpleNamespace(delays=[25], delay_stride=1, delay_ahead=0, gap=100, test_fraction=0.25, cross_yaw=None)
     for k, v in kw.items():
         setattr(a, k, v)
     return a
@@ -77,8 +75,7 @@ def test_no_window_spans_a_seam():
     """Every kept index is at least `warmup` past the start of its own run."""
     tr, te, run_id = _multi()
     for idx in (tr, te):
-        offset = idx - np.array([np.flatnonzero(run_id == r)[0]
-                                 for r in run_id[idx]])
+        offset = idx - np.array([np.flatnonzero(run_id == r)[0] for r in run_id[idx]])
         assert offset.min() >= WARMUP, (
             f"an index sits {offset.min()} samples into its run, inside the "
             "zero-padded warm-up -- the embedding is reading the previous run"
@@ -91,8 +88,7 @@ def test_forward_lags_do_not_read_past_a_run_end():
     for idx in (tr, te):
         room = np.array([ends[r] for r in run_id[idx]]) - idx
         assert room.min() >= 25, (
-            f"an index is {room.min()} samples from its run's end with 25 "
-            "forward lags -- it would read zero padding"
+            f"an index is {room.min()} samples from its run's end with 25 forward lags -- it would read zero padding"
         )
 
 
@@ -129,8 +125,8 @@ def test_nmse_by_run_is_self_normalised():
     `nmse_by_run` restores the comparison by normalising each run by itself.
     """
     import sys as _sys
-    _sys.path.insert(0, os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
     from sparse_sensor_study import nmse_by_run
 
     rng = np.random.default_rng(0)
@@ -139,7 +135,7 @@ def test_nmse_by_run_is_self_normalised():
     fluct = rng.standard_normal((n_x, 2 * n))
     pred_err = 0.5 * rng.standard_normal((n_x, 2 * n))
     offset = np.zeros((n_x, 2 * n))
-    offset[:, n:] = 25.0                      # run 1 sits far from run 0
+    offset[:, n:] = 25.0  # run 1 sits far from run 0
     Q = fluct + offset
     pred = Q - pred_err
 
@@ -154,19 +150,17 @@ def test_nmse_by_run_is_self_normalised():
     # both runs are equally well reconstructed, so their self-normalised scores
     # must agree -- and both must exceed the flattering pooled number
     assert abs(vals[0] - vals[1]) < 0.05, f"per-run scores disagree: {vals}"
-    from tools.epod import nmse as _nmse
+    from field_estimation.epod import nmse as _nmse
+
     pooled = _nmse(Q[:, te], pred[:, te])
-    assert pooled < min(vals), (
-        f"pooled {pooled:.4f} should flatter relative to per-run {vals}"
-    )
+    assert pooled < min(vals), f"pooled {pooled:.4f} should flatter relative to per-run {vals}"
 
 
 def test_nmse_by_run_is_empty_for_a_single_run():
     import sys as _sys
-    _sys.path.insert(0, os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
     from sparse_sensor_study import nmse_by_run
 
     Q = np.random.default_rng(0).standard_normal((10, 50))
-    assert nmse_by_run(Q, Q * 0.9, np.arange(50), np.zeros(50, int),
-                       [_Case("only")]) == ""
+    assert nmse_by_run(Q, Q * 0.9, np.arange(50), np.zeros(50, int), [_Case("only")]) == ""

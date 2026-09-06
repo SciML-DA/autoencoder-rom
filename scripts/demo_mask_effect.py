@@ -33,7 +33,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from tools.epod import PODLSE, delay_embed, nmse  # noqa: E402
+from field_estimation.epod import PODLSE, delay_embed, nmse  # noqa: E402
 
 
 def synthetic(seed: int = 0):
@@ -73,10 +73,8 @@ def score(Fn, S, mask, t, interp: bool) -> float:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--real", action="store_true",
-                   help="also print the April-experiment arithmetic")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--real", action="store_true", help="also print the April-experiment arithmetic")
     args = p.parse_args()
 
     Fn, S, bad, wake, t = synthetic()
@@ -84,8 +82,7 @@ def main() -> int:
     w = wake.ravel()
 
     print(f"\n  mean invalid vectors per frame : {100 * bad.mean():.2f}% of the grid\n")
-    print(f"  {'mask rule':<28} {'points':>8} {'% grid':>8} "
-          f"{'wake energy kept':>18} {'test NMSE':>11}")
+    print(f"  {'mask rule':<28} {'points':>8} {'% grid':>8} {'wake energy kept':>18} {'test NMSE':>11}")
     for label, mask, interp in [
         ("strict any-frame (old)", frac_bad == 0, False),
         ("mask_tol 0.02 + interp", frac_bad <= 0.02, True),
@@ -93,9 +90,8 @@ def main() -> int:
         ("keep all + interp", np.ones_like(frac_bad, bool), True),
     ]:
         v = score(Fn, S, mask, t, interp)
-        kept = (w[mask.ravel()] ** 2).sum() / (w ** 2).sum()
-        print(f"  {label:<28} {mask.sum():>8d} {100 * mask.mean():>7.1f}% "
-              f"{kept:>18.3f} {v:>11.4f}")
+        kept = (w[mask.ravel()] ** 2).sum() / (w**2).sum()
+        print(f"  {label:<28} {mask.sum():>8d} {100 * mask.mean():>7.1f}% {kept:>18.3f} {v:>11.4f}")
 
     print("\n  The strict rule keeps most of the grid and almost none of the wake,")
     print("  and the reconstruction goes from working to worse than predicting")
@@ -113,8 +109,10 @@ def main() -> int:
         dropped = n_pix - kept - body
         print(f"    dropped and NOT body       {dropped}")
         print(f"    ...those points share {per_frame} invalid vectors per frame,")
-        print(f"       so the average one is valid in "
-              f"{100 * (1 - per_frame / dropped):.1f}% of frames and is discarded anyway.")
+        print(
+            f"       so the average one is valid in "
+            f"{100 * (1 - per_frame / dropped):.1f}% of frames and is discarded anyway."
+        )
     print()
     return 0
 

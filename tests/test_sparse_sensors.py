@@ -30,15 +30,15 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO, "scripts")
 sys.path.insert(0, os.path.join(REPO, "src"))
 
-from datasets import wake_experiment as we  # noqa: E402
-from tools.branched_ae import (  # noqa: E402
+from experiments.april_wake import case_reader as we  # noqa: E402
+from field_estimation.branched_ae import (  # noqa: E402
     BranchedAE,
     LatentForecaster,
     LinearLatent,
     TorchLatent,
     sensor_windows,
 )
-from tools.epod import (  # noqa: E402
+from field_estimation.epod import (  # noqa: E402
     PODLSE,
     ExtendedPOD,
     blocked_folds,

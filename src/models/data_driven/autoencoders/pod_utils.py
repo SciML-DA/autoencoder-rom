@@ -1,10 +1,13 @@
 """
-pod_spod.py
-=============
-Pre-processing, decomposition algorithms, and linear subspace ROM classes.
+Decomposition algorithms behind the linear projectors.
+
+Bare functions on a data matrix: no state, no classes. The `POD` and `SPOD`
+projectors that call them live in ``pod.py`` -- this module used to be
+``tools/pod_spod.py`` and held both.
 
 Functions
 ---------
+energy_fraction         : cumulative energy captured per mode
 snapshot_pod            : Snapshot POD — exact solver (Sirovich 1987)
 snapshot_pod_randomized : Randomized snapshot POD (Halko et al. 2011)
 spod_sieber             : SPOD via filtered correlation matrix (Sieber et al. 2016)
@@ -12,25 +15,25 @@ spod_towne              : SPOD via Welch CSD (Towne et al. 2018)
 spod_towne_reconstruct  : inverse SPOD [stub]
 print_spod_towne_summary: pretty-print Towne SPOD parameters
 
-Classes
--------
-LinearROM   : abstract base for any method with Psi / Phi / Sigma attributes.
-POD         : snapshot POD — exact (Sirovich 1987) or randomized (Halko 2011).
-SPOD        : Sieber spectral POD (Sieber, Paschereit & Oberleithner, JFM 2016).
-
 Usage
 -----
-::
+Prefer the projectors in ``pod.py``; they handle the masking and mean removal
+that these functions assume has already happened. `POD.fit` takes raw grid
+input ``(Nu, N_t, Nx, Ny)`` and detects the NaN body mask itself::
 
-    from utils import prepare_data
-    from pod_spod import POD, SPOD
+    from models.data_driven.autoencoders import POD
 
-    Q, fluid_mask, to_grid = prepare_data([ux_raw, uy_raw])   # (N_fluid*2, N_t)
+    pod = POD(n_modes=20).fit(X)      # X (Nu, N_t, Nx, Ny) or flat (N_x, N_t)
+    Z   = pod.encode(X)               # (N_modes, N_t) -- POD coefficients
+    Q_r = pod.decode(Z)               # (N_x, N_t) -- reconstruction
+    mode1 = pod._to_physical_grid(pod.Psi[:, :1])   # (Nu, Nx, Ny), NaN at body
 
-    pod = POD(n_modes=20).fit(Q)
-    Z   = pod.encode(Q)               # (N_modes, N_t) -- POD coefficients
-    Q_r = pod.decode(Z)               # (N_fluid*2, N_t) -- reconstruction
-    mode1 = to_grid(pod.Psi[:N_fluid, 0])   # (Nx, Ny) with NaN at body
+Call the functions here directly only when you already hold a zero-mean data
+matrix ``Q (N_x, N_t)`` and want the raw factors::
+
+    from models.data_driven.autoencoders.pod_utils import snapshot_pod
+
+    Sigma, Psi, Phi, C = snapshot_pod(Q)   # C: the (N_t, N_t) correlation matrix
 
 Convention (Mendez 2023)
 ------------------------

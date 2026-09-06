@@ -16,7 +16,8 @@ which of either it got:
     history, decoding them at the sensors, labels, and resets.
 
 Both are written against the `Forecaster` protocol rather than `ESN_model`, so
-adding `LSTM_model` costs leaf classes and not edits here.
+adding `LSTM_model` costs leaf classes and not edits here. The leaf classes and
+the constructor they share live in ``roms/``.
 """
 
 from __future__ import annotations

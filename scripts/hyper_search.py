@@ -56,14 +56,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.sparse_sensors import (  # noqa: E402
+from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,
     band_limit,
     load_data,
     make_split,
 )
-from tools.branched_ae import BranchedAE, LinearLatent, TorchLatent  # noqa: E402
-from tools.epod import PODLSE, cosine, delay_embed, nmse, pod  # noqa: E402
+from field_estimation.branched_ae import BranchedAE, LinearLatent, TorchLatent  # noqa: E402
+from field_estimation.epod import PODLSE, cosine, delay_embed, nmse, pod  # noqa: E402
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  CONFIG -- edit this, not the command line
@@ -73,13 +73,23 @@ from tools.epod import PODLSE, cosine, delay_embed, nmse, pod  # noqa: E402
 # Treat it as arbitrary: it is today's defaults, and whether they are anywhere
 # near optimal is precisely what is in question.
 CENTRE = dict(
-    latent="pod", branch="mlp",
-    r_field=16, n_delays=25,
-    hidden=(32, 32), cnn_channels=(16, 32), kernel_size=5,
-    gru_hidden=32, gru_layers=1,
-    activation="tanh", dropout=0.0,
-    weight_decay=0.0, sensor_noise=0.0, lr=3e-3,
-    band_hz=None, ensemble=1, seed=0,
+    latent="pod",
+    branch="mlp",
+    r_field=16,
+    n_delays=25,
+    hidden=(32, 32),
+    cnn_channels=(16, 32),
+    kernel_size=5,
+    gru_hidden=32,
+    gru_layers=1,
+    activation="tanh",
+    dropout=0.0,
+    weight_decay=0.0,
+    sensor_noise=0.0,
+    lr=3e-3,
+    band_hz=None,
+    ensemble=1,
+    seed=0,
     lambda_field=0.0,
 )
 
@@ -87,15 +97,15 @@ CENTRE = dict(
 # both below and above the current defaults -- "smaller is better" is the
 # hypothesis under test, not an assumption to build in.
 SCREEN = {
-    "r_field":      [2, 4, 8, 16, 32, 64, 128],
-    "n_delays":     [1, 5, 10, 25, 50, 100],
-    "hidden":       [(8,), (16,), (32,), (16, 16), (32, 32), (128, 128), (256, 256)],
+    "r_field": [2, 4, 8, 16, 32, 64, 128],
+    "n_delays": [1, 5, 10, 25, 50, 100],
+    "hidden": [(8,), (16,), (32,), (16, 16), (32, 32), (128, 128), (256, 256)],
     "cnn_channels": [(4,), (8,), (16,), (8, 16), (16, 32), (32, 64), (64, 128)],
-    "kernel_size":  [3, 5, 9, 15],
-    "gru_hidden":   [8, 16, 32, 64, 128],
-    "gru_layers":   [1, 2],
-    "activation":   ["tanh", "relu", "gelu"],
-    "dropout":      [0.0, 0.1, 0.25, 0.5],
+    "kernel_size": [3, 5, 9, 15],
+    "gru_hidden": [8, 16, 32, 64, 128],
+    "gru_layers": [1, 2],
+    "activation": ["tanh", "relu", "gelu"],
+    "dropout": [0.0, 0.1, 0.25, 0.5],
     # Top of this range used to be 1e-1, which is exactly the "standard
     # practice" value that Kim et al. (2025) find is ~30x too small for
     # over-parameterised models in the data-constrained regime. Stopping there
@@ -103,24 +113,41 @@ SCREEN = {
     # never having tried enough decay -- hence the range running out to 3.0.
     "weight_decay": [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 3.0],
     "sensor_noise": [0.0, 0.05, 0.1, 0.25, 0.5, 1.0],
-    "lr":           [3e-4, 1e-3, 3e-3, 1e-2, 3e-2],
-    "band_hz":      [None, 20.0, 30.0, 40.0, 60.0],
+    "lr": [3e-4, 1e-3, 3e-3, 1e-2, 3e-2],
+    "band_hz": [None, 20.0, 30.0, 40.0, 60.0],
 }
 
 # Which axes apply to which branch. Screening `gru_hidden` on an MLP would burn
 # a fit to re-measure the centre point.
 AXES_FOR = {
     "linear": ["r_field", "n_delays", "weight_decay", "sensor_noise", "lr", "band_hz"],
-    "mlp":    ["r_field", "n_delays", "hidden", "activation", "dropout",
-               "weight_decay", "sensor_noise", "lr", "band_hz"],
-    "cnn":    ["r_field", "n_delays", "cnn_channels", "kernel_size", "activation",
-               "dropout", "weight_decay", "sensor_noise", "lr", "band_hz"],
-    "gru":    ["r_field", "n_delays", "gru_hidden", "gru_layers", "dropout",
-               "weight_decay", "sensor_noise", "lr", "band_hz"],
+    "mlp": ["r_field", "n_delays", "hidden", "activation", "dropout", "weight_decay", "sensor_noise", "lr", "band_hz"],
+    "cnn": [
+        "r_field",
+        "n_delays",
+        "cnn_channels",
+        "kernel_size",
+        "activation",
+        "dropout",
+        "weight_decay",
+        "sensor_noise",
+        "lr",
+        "band_hz",
+    ],
+    "gru": [
+        "r_field",
+        "n_delays",
+        "gru_hidden",
+        "gru_layers",
+        "dropout",
+        "weight_decay",
+        "sensor_noise",
+        "lr",
+        "band_hz",
+    ],
 }
 
-SCREEN_MODELS = [("pod", "linear"), ("pod", "mlp"), ("pod", "cnn"), ("pod", "gru"),
-                 ("ae", "linear"), ("ae", "mlp")]
+SCREEN_MODELS = [("pod", "linear"), ("pod", "mlp"), ("pod", "cnn"), ("pod", "gru"), ("ae", "linear"), ("ae", "mlp")]
 
 # Stage 2. Full factorial on pairs where an interaction is expected. Each entry
 # is (axis_a, values_a, axis_b, values_b, [(latent, branch), ...]).
@@ -129,80 +156,119 @@ PAIRS = [
     # *is* the shrink-vs-penalise question, so its decay levels have to reach
     # the regime where penalising could plausibly win -- the old top of 1e-2
     # could only ever have answered "shrink"
-    ("hidden", [(8,), (32,), (128, 128)],
-     "weight_decay", [0.0, 1e-3, 1e-1, 3.0], [("pod", "mlp")]),
+    ("hidden", [(8,), (32,), (128, 128)], "weight_decay", [0.0, 1e-3, 1e-1, 3.0], [("pod", "mlp")]),
     # both consume the same scarce data
-    ("hidden", [(8,), (32,), (128, 128)],
-     "n_delays", [5, 25, 100], [("pod", "mlp")]),
+    ("hidden", [(8,), (32,), (128, 128)], "n_delays", [5, 25, 100], [("pod", "mlp")]),
     # the stage-N noise null result was measured at one (large) width
-    ("hidden", [(8,), (32,), (128, 128)],
-     "sensor_noise", [0.0, 0.1, 0.5], [("pod", "mlp")]),
+    ("hidden", [(8,), (32,), (128, 128)], "sensor_noise", [0.0, 0.1, 0.5], [("pod", "mlp")]),
     # a narrower target may need fewer modes
-    ("band_hz", [None, 20.0, 40.0],
-     "r_field", [4, 16, 64], [("pod", "linear"), ("pod", "mlp")]),
+    ("band_hz", [None, 20.0, 40.0], "r_field", [4, 16, 64], [("pod", "linear"), ("pod", "mlp")]),
     # AE models are trained on the latent term but *scored* in field space, and
     # for a non-orthonormal AE decoder those are not the same objective (they
     # are for POD, which is why this is an AE-only pair -- scanning it on POD
     # would only rescale the loss and buy a decoder pass for nothing). Crossed
     # with r_field because the latent/field discrepancy should grow with latent
     # dimension: if lambda_field matters anywhere, it matters most at large r.
-    ("lambda_field", [0.0, 0.1, 1.0],
-     "r_field", [4, 16, 64], [("ae", "linear"), ("ae", "mlp")]),
+    ("lambda_field", [0.0, 0.1, 1.0], "r_field", [4, 16, 64], [("ae", "linear"), ("ae", "mlp")]),
 ]
 
 # Stage 3. Monte Carlo over everything at once. ("log", lo, hi) samples
 # log-uniformly; a list is sampled uniformly.
 RANDOM_SPACE = {
-    "latent":       ["pod", "ae"],
-    "branch":       ["linear", "mlp", "cnn", "gru"],
-    "r_field":      ("logint", 2, 128),
-    "n_delays":     ("logint", 2, 100),
-    "hidden":       [(8,), (16,), (32,), (64,), (16, 16), (32, 32), (64, 64),
-                     (128, 128), (32, 32, 32)],
+    "latent": ["pod", "ae"],
+    "branch": ["linear", "mlp", "cnn", "gru"],
+    "r_field": ("logint", 2, 128),
+    "n_delays": ("logint", 2, 100),
+    "hidden": [(8,), (16,), (32,), (64,), (16, 16), (32, 32), (64, 64), (128, 128), (32, 32, 32)],
     "cnn_channels": [(4,), (8,), (16,), (8, 16), (16, 32), (32, 64)],
-    "kernel_size":  [3, 5, 9, 15],
-    "gru_hidden":   [8, 16, 32, 64, 128],
-    "gru_layers":   [1, 2],
-    "activation":   ["tanh", "relu", "gelu"],
-    "dropout":      [0.0, 0.1, 0.2, 0.3, 0.5],
+    "kernel_size": [3, 5, 9, 15],
+    "gru_hidden": [8, 16, 32, 64, 128],
+    "gru_layers": [1, 2],
+    "activation": ["tanh", "relu", "gelu"],
+    "dropout": [0.0, 0.1, 0.2, 0.3, 0.5],
     # bottom raised from 1e-7: the screen found 0 through 1e-3 indistinguishable,
     # so the lowest decades only spend trials re-measuring "no decay". Top raised
     # to 3.0 for the reason in SCREEN above.
     "weight_decay": ("log", 1e-6, 3.0),
     "sensor_noise": [0.0, 0.05, 0.1, 0.25, 0.5],
-    "lr":           ("log", 3e-4, 3e-2),
-    "band_hz":      [None, 20.0, 30.0, 40.0, 60.0],
+    "lr": ("log", 3e-4, 3e-2),
+    "band_hz": [None, 20.0, 30.0, 40.0, 60.0],
     # a list rather than ("log", ...) so 0.0 -- the value every trial so far has
     # used, and the one the others must be judged against -- stays reachable
     "lambda_field": [0.0, 0.01, 0.1, 0.3, 1.0],
 }
-N_RANDOM = 400          # trials; the driver stops on walltime, not on this
-CONFIRM_TOP = 20        # kept for reference; superseded by CONFIRM_PER_BAND
-CONFIRM_PER_BAND = 4    # best-on-validation per band -- 4 x 5 bands = 20 configs,
-                        # the same budget as the old global top-20 but spread so
-                        # every band gets a test number instead of only 20 Hz
+N_RANDOM = 400  # trials; the driver stops on walltime, not on this
+CONFIRM_TOP = 20  # kept for reference; superseded by CONFIRM_PER_BAND
+CONFIRM_PER_BAND = 4  # best-on-validation per band -- 4 x 5 bands = 20 configs,
+# the same budget as the old global top-20 but spread so
+# every band gets a test number instead of only 20 Hz
 CONFIRM_SEEDS = 5
 
 TRAIN_EPOCHS = 2000
 PATIENCE = 200
 BATCH = 128
-VAL_FRACTION = 0.2      # inside the training block, for early stopping
-SELECT_GAP = 100        # guard band between the train and validation blocks
-SELECT_FRACTION = 0.2   # tail of the training block reserved for selection
+VAL_FRACTION = 0.2  # inside the training block, for early stopping
+SELECT_GAP = 100  # guard band between the train and validation blocks
+SELECT_FRACTION = 0.2  # tail of the training block reserved for selection
 
 # ══════════════════════════════════════════════════════════════════════════════
 
-FIELDS = ["stage", "trial", "latent", "branch", "r_field", "n_delays", "hidden",
-          "cnn_channels", "kernel_size", "gru_hidden", "gru_layers", "activation",
-          "dropout", "weight_decay", "sensor_noise", "lr", "band_hz", "ensemble",
-          "lambda_field", "seed", "axis", "n_params", "size_proxy", "nmse_train", "nmse_val",
-          "cos_val", "nmse_test", "nmse_fullband", "epochs_run", "best_epoch",
-          "stopped_early", "seconds"]
+FIELDS = [
+    "stage",
+    "trial",
+    "latent",
+    "branch",
+    "r_field",
+    "n_delays",
+    "hidden",
+    "cnn_channels",
+    "kernel_size",
+    "gru_hidden",
+    "gru_layers",
+    "activation",
+    "dropout",
+    "weight_decay",
+    "sensor_noise",
+    "lr",
+    "band_hz",
+    "ensemble",
+    "lambda_field",
+    "seed",
+    "axis",
+    "n_params",
+    "size_proxy",
+    "nmse_train",
+    "nmse_val",
+    "cos_val",
+    "nmse_test",
+    "nmse_fullband",
+    "epochs_run",
+    "best_epoch",
+    "stopped_early",
+    "seconds",
+]
 
-KEY = ("stage", "latent", "branch", "r_field", "n_delays", "hidden",
-       "cnn_channels", "kernel_size", "gru_hidden", "gru_layers", "activation",
-       "dropout", "weight_decay", "sensor_noise", "lr", "band_hz", "ensemble",
-       "lambda_field", "seed")
+KEY = (
+    "stage",
+    "latent",
+    "branch",
+    "r_field",
+    "n_delays",
+    "hidden",
+    "cnn_channels",
+    "kernel_size",
+    "gru_hidden",
+    "gru_layers",
+    "activation",
+    "dropout",
+    "weight_decay",
+    "sensor_noise",
+    "lr",
+    "band_hz",
+    "ensemble",
+    "lambda_field",
+    "seed",
+)
 
 
 def rule(t):
@@ -277,8 +343,7 @@ def three_way(args, Q, run_id, cases):
             f"then {n_val} to validation and {SELECT_GAP} to the guard band. "
             "Use a longer record, a shorter --delays, or lower SELECT_GAP."
         )
-    print(f"  select: train {len(tr_in)}, val {len(va)}, test {len(te)} "
-          f"(gap {SELECT_GAP})")
+    print(f"  select: train {len(tr_in)}, val {len(va)}, test {len(te)} (gap {SELECT_GAP})")
     return tr_in, va, te
 
 
@@ -293,15 +358,22 @@ class Latents:
         if (kind, r) in self._c:
             return self._c[(kind, r)]
         if kind == "pod":
-            Psi, _, _, qm = pod(self.Q[:, self.tr], r=r, subtract_mean=True,
-                                method="randomized")
+            Psi, _, _, qm = pod(self.Q[:, self.tr], r=r, subtract_mean=True, method="randomized")
             lat = LinearLatent(Psi, qm, device=self.args.device)
         else:
             from models.data_driven.autoencoders import AE
+
             dims = tuple(max(int(f * r), r + 1) for f in (8, 2))
-            p = AE(n_latent=r, layer_dims=dims, n_epochs=400, batch_size=64,
-                   learning_rate=1e-3, patience=40, device=self.args.device,
-                   seed=0)
+            p = AE(
+                n_latent=r,
+                layer_dims=dims,
+                n_epochs=400,
+                batch_size=64,
+                learning_rate=1e-3,
+                patience=40,
+                device=self.args.device,
+                seed=0,
+            )
             p.fit(self.unflat(self.Q[:, self.tr], dtype=np.float32))
             lat = TorchLatent(p, device=self.args.device)
         self._c[(kind, r)] = lat
@@ -334,16 +406,26 @@ def run_trial(cfg, data, latents, args, with_test=False):
     preds_va, preds_te, trs, eps, bests, stops = [], [], [], [], [], []
     for j in range(n_ens):
         m = BranchedAE(
-            lat, branch=cfg["branch"], n_delays=int(cfg["n_delays"]),
-            hidden=tuple(cfg["hidden"]), cnn_channels=tuple(cfg["cnn_channels"]),
-            kernel_size=int(cfg["kernel_size"]), gru_hidden=int(cfg["gru_hidden"]),
-            gru_layers=int(cfg["gru_layers"]), activation=cfg["activation"],
-            dropout=float(cfg["dropout"]), weight_decay=float(cfg["weight_decay"]),
+            lat,
+            branch=cfg["branch"],
+            n_delays=int(cfg["n_delays"]),
+            hidden=tuple(cfg["hidden"]),
+            cnn_channels=tuple(cfg["cnn_channels"]),
+            kernel_size=int(cfg["kernel_size"]),
+            gru_hidden=int(cfg["gru_hidden"]),
+            gru_layers=int(cfg["gru_layers"]),
+            activation=cfg["activation"],
+            dropout=float(cfg["dropout"]),
+            weight_decay=float(cfg["weight_decay"]),
             sensor_noise=float(cfg["sensor_noise"]),
             lambda_field=float(cfg.get("lambda_field", 0.0) or 0.0),
-            learning_rate=float(cfg["lr"]), n_epochs=TRAIN_EPOCHS,
-            batch_size=BATCH, val_fraction=VAL_FRACTION, patience=PATIENCE,
-            seed=int(cfg["seed"]) * 1000 + j, device=args.device,
+            learning_rate=float(cfg["lr"]),
+            n_epochs=TRAIN_EPOCHS,
+            batch_size=BATCH,
+            val_fraction=VAL_FRACTION,
+            patience=PATIENCE,
+            seed=int(cfg["seed"]) * 1000 + j,
+            device=args.device,
         ).fit(Q, S, tr)
         preds_va.append(m.predict(S, va))
         if with_test:
@@ -358,16 +440,19 @@ def run_trial(cfg, data, latents, args, with_test=False):
     pv = np.mean(preds_va, axis=0)
     row = dict(cfg)
     row.update(
-        n_params=n_par * n_ens, size_proxy=size_proxy(cfg),
-        nmse_train=float(np.mean(trs)), nmse_val=nmse(Q[:, va], pv),
-        cos_val=cosine(Q[:, va] - Q[:, va].mean(1, keepdims=True),
-                       pv - pv.mean(1, keepdims=True)),
-        nmse_test=(nmse(Q[:, te], np.mean(preds_te, axis=0)) if with_test
-                   else float("nan")),
-        nmse_fullband=(nmse(Q_full[:, te], np.mean(preds_te, axis=0))
-                       if with_test and Q_full is not None else float("nan")),
-        epochs_run=int(np.mean(eps)), best_epoch=int(np.mean(bests)),
-        stopped_early=int(np.mean(stops) > 0.5), seconds=time.time() - t0,
+        n_params=n_par * n_ens,
+        size_proxy=size_proxy(cfg),
+        nmse_train=float(np.mean(trs)),
+        nmse_val=nmse(Q[:, va], pv),
+        cos_val=cosine(Q[:, va] - Q[:, va].mean(1, keepdims=True), pv - pv.mean(1, keepdims=True)),
+        nmse_test=(nmse(Q[:, te], np.mean(preds_te, axis=0)) if with_test else float("nan")),
+        nmse_fullband=(
+            nmse(Q_full[:, te], np.mean(preds_te, axis=0)) if with_test and Q_full is not None else float("nan")
+        ),
+        epochs_run=int(np.mean(eps)),
+        best_epoch=int(np.mean(bests)),
+        stopped_early=int(np.mean(stops) > 0.5),
+        seconds=time.time() - t0,
     )
     return row
 
@@ -375,8 +460,9 @@ def run_trial(cfg, data, latents, args, with_test=False):
 def reference(Q, S, tr, va, te, args, with_test=False):
     """Closed-form PODLSE. In every stage, because it still wins."""
     Sd = delay_embed(S, int(CENTRE["n_delays"]), 1, args.delay_ahead)
-    m = PODLSE(r_field=int(CENTRE["r_field"]), r_sensor=None, ridge=1e-3,
-               pod_method="randomized").fit(Q[:, tr], Sd[:, tr])
+    m = PODLSE(r_field=int(CENTRE["r_field"]), r_sensor=None, ridge=1e-3, pod_method="randomized").fit(
+        Q[:, tr], Sd[:, tr]
+    )
     v = nmse(Q[:, va], m.predict(Sd[:, va]))
     t = nmse(Q[:, te], m.predict(Sd[:, te])) if with_test else float("nan")
     print(f"  PODLSE reference: val {v:.4f}" + (f"  test {t:.4f}" if with_test else ""))
@@ -426,8 +512,7 @@ def stage_random(seed=0, n=None):
             if isinstance(spec, tuple) and spec[0] == "log":
                 c[k] = float(np.exp(rng.uniform(np.log(spec[1]), np.log(spec[2]))))
             elif isinstance(spec, tuple) and spec[0] == "logint":
-                c[k] = int(round(np.exp(rng.uniform(np.log(spec[1]),
-                                                    np.log(spec[2])))))
+                c[k] = int(round(np.exp(rng.uniform(np.log(spec[1]), np.log(spec[2])))))
             else:
                 c[k] = spec[rng.integers(len(spec))]
         c["seed"] = i
@@ -441,8 +526,7 @@ def stage_confirm(out_dir):
     if not os.path.exists(path):
         print("  nothing to confirm: no results.csv yet")
         return []
-    rows = [r for r in csv.DictReader(open(path))
-            if r["stage"] != "confirm" and r["nmse_val"] not in ("", "nan")]
+    rows = [r for r in csv.DictReader(open(path)) if r["stage"] != "confirm" and r["nmse_val"] not in ("", "nan")]
     rows.sort(key=lambda r: float(r["nmse_val"]))
 
     # Stratify by band. nmse_val is not comparable across bands -- a narrower
@@ -457,8 +541,10 @@ def stage_confirm(out_dir):
     picked = []
     for b in sorted(per_band, key=lambda k: (k is not None, k)):
         picked += per_band[b][:CONFIRM_PER_BAND]
-    rule(f"confirm: {CONFIRM_PER_BAND} per band over {len(per_band)} bands "
-         f"= {len(picked)} configs x {CONFIRM_SEEDS} seeds")
+    rule(
+        f"confirm: {CONFIRM_PER_BAND} per band over {len(per_band)} bands "
+        f"= {len(picked)} configs x {CONFIRM_SEEDS} seeds"
+    )
 
     out = []
     for r in picked:
@@ -493,24 +579,26 @@ STAGES = {"screen": stage_screen, "pair": stage_pair, "random": stage_random}
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_data_args(p)
     p.add_argument("--delays", type=int, nargs="+", default=[100])
     p.add_argument("--delay-stride", type=int, default=1)
-    p.add_argument("--stages", nargs="+", default=["screen"],
-                   choices=["screen", "pair", "random", "confirm"])
+    p.add_argument("--stages", nargs="+", default=["screen"], choices=["screen", "pair", "random", "confirm"])
     p.add_argument("--out", default="results/hyper_search")
     p.add_argument("--tag", default="default")
     p.add_argument("--device", default=None)
-    p.add_argument("--max-hours", type=float, default=0.0,
-                   help="stop launching new trials after this long (0 = no limit)")
+    p.add_argument(
+        "--max-hours", type=float, default=0.0, help="stop launching new trials after this long (0 = no limit)"
+    )
     p.add_argument("--limit", type=int, default=0, help="cap trials, for testing")
-    p.add_argument("--random-seed", type=int, default=0,
-                   help="shard the random stage; separate seeds draw disjoint "
-                        "samples that can run in parallel under separate tags")
-    p.add_argument("--n-random", type=int, default=0,
-                   help="trials in this random shard (0 = the full N_RANDOM)")
+    p.add_argument(
+        "--random-seed",
+        type=int,
+        default=0,
+        help="shard the random stage; separate seeds draw disjoint "
+        "samples that can run in parallel under separate tags",
+    )
+    p.add_argument("--n-random", type=int, default=0, help="trials in this random shard (0 = the full N_RANDOM)")
     args = p.parse_args()
 
     out_dir = os.path.join(args.out, args.tag)
@@ -528,7 +616,7 @@ def main() -> int:
     # once per level rather than once per trial, and only the current level is
     # kept, because the AE latents are not small.
     ctx: dict = {}
-    refs: dict = {}          # band -> PODLSE reference, for the stage summary
+    refs: dict = {}  # band -> PODLSE reference, for the stage summary
 
     def band_data(band):
         if ctx and ctx["band"] == band:
@@ -540,16 +628,23 @@ def main() -> int:
             print(f"  [target band-limited to {band:g} Hz]", flush=True)
         tr, va, te = three_way(args, Q, run_id, cases)
         ctx.clear()
-        ctx.update(band=band, Q=Q, Q_full=Q_full, tr=tr, va=va, te=te,
-                   latents=Latents(Q, tr, unflat, args),
-                   ref=reference(Q, S, tr, va, te, args))
+        ctx.update(
+            band=band,
+            Q=Q,
+            Q_full=Q_full,
+            tr=tr,
+            va=va,
+            te=te,
+            latents=Latents(Q, tr, unflat, args),
+            ref=reference(Q, S, tr, va, te, args),
+        )
         refs[band] = ctx["ref"]
         return ctx
 
     done = set()
     if os.path.exists(path):
         for r in csv.DictReader(open(path)):
-            done.add(key_of(r))          # same normalisation as the configs
+            done.add(key_of(r))  # same normalisation as the configs
         print(f"  resuming: {len(done)} trial(s) already in {path}")
     else:
         with open(path, "w", newline="") as fh:
@@ -572,8 +667,7 @@ def main() -> int:
         todo = [c for c in cfgs if key_of(c) not in done]
         if args.limit:
             todo = todo[: args.limit]
-        rule(f"stage {st}: {len(cfgs)} configs, {len(todo)} to run "
-             f"(smallest model first)")
+        rule(f"stage {st}: {len(cfgs)} configs, {len(todo)} to run (smallest model first)")
 
         best = (float("inf"), None)
         for i, c in enumerate(todo):
@@ -582,35 +676,43 @@ def main() -> int:
                 break
             c["trial"] = i
             d = band_data(band_of(c, args))
-            row = run_trial(c, (d["Q"], d["Q_full"], S, d["tr"], d["va"],
-                                d["te"]), d["latents"], args,
-                            with_test=(st == "confirm"))
+            row = run_trial(
+                c, (d["Q"], d["Q_full"], S, d["tr"], d["va"], d["te"]), d["latents"], args, with_test=(st == "confirm")
+            )
             with open(path, "a", newline="") as fh:
-                csv.DictWriter(fh, fieldnames=FIELDS).writerow(
-                    {k: row.get(k) for k in FIELDS})
+                csv.DictWriter(fh, fieldnames=FIELDS).writerow({k: row.get(k) for k in FIELDS})
             done.add(key_of(c))
             if row["nmse_val"] < best[0]:
                 best = (row["nmse_val"], c)
             flag = "  <-- best so far" if row["nmse_val"] == best[0] else ""
-            print(f"  [{i + 1:>4}/{len(todo)}] {c['latent']}+{c['branch']:<6} "
-                  f"{c.get('axis',''):<14} par {row['n_params']:>8,d}  "
-                  f"val {row['nmse_val']:.4f}  train {row['nmse_train']:.4f}  "
-                  f"best@{row['best_epoch']:<4} {row['seconds']:.0f}s{flag}",
-                  flush=True)
+            print(
+                f"  [{i + 1:>4}/{len(todo)}] {c['latent']}+{c['branch']:<6} "
+                f"{c.get('axis', ''):<14} par {row['n_params']:>8,d}  "
+                f"val {row['nmse_val']:.4f}  train {row['nmse_train']:.4f}  "
+                f"best@{row['best_epoch']:<4} {row['seconds']:.0f}s{flag}",
+                flush=True,
+            )
         if best[1]:
             # the reference for the winner's own band -- a banded target is a
             # smaller target, so comparing across bands would flatter whichever
             # band happened to be narrowest
             r0 = refs.get(band_of(best[1], args))
-            print(f"\n  stage {st} best: val {best[0]:.4f}"
-                  + (f" vs PODLSE {r0:.4f}" if r0 is not None else ""))
+            print(f"\n  stage {st} best: val {best[0]:.4f}" + (f" vs PODLSE {r0:.4f}" if r0 is not None else ""))
             print(f"    {json.dumps({k: str(v) for k, v in best[1].items() if k in KEY})}")
 
     with open(os.path.join(out_dir, "config.json"), "w") as fh:
-        json.dump(dict(centre={k: str(v) for k, v in CENTRE.items()},
-                       screen={k: str(v) for k, v in SCREEN.items()},
-                       n_random=N_RANDOM, epochs=TRAIN_EPOCHS,
-                       args=vars(args)), fh, indent=2, default=str)
+        json.dump(
+            dict(
+                centre={k: str(v) for k, v in CENTRE.items()},
+                screen={k: str(v) for k, v in SCREEN.items()},
+                n_random=N_RANDOM,
+                epochs=TRAIN_EPOCHS,
+                args=vars(args),
+            ),
+            fh,
+            indent=2,
+            default=str,
+        )
     rule("done")
     print(f"  {path}")
     return 0

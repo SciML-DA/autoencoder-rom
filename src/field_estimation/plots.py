@@ -1,8 +1,5 @@
 """
-reconstruction.py
-=================
-
-Plots for the sparse-sensor reconstruction task: spectra, observability,
+Plots for the sparse-sensor field-estimation task: spectra, observability,
 extended POD modes, method comparisons, and the reconstruction animation that
 is the whole point of the exercise.
 
@@ -14,6 +11,12 @@ look fine.
 
 Headless by default -- ``matplotlib.use("Agg")`` is set by the caller, not here,
 so importing this module does not hijack an interactive session.
+
+Lives beside the estimators rather than in ``plotting/`` so that
+``field_estimation`` is self-contained: it is one package, taken or left whole.
+``plotting/`` is now purely the ROM-side figures. Not imported by
+``field_estimation/__init__.py`` -- nothing in the estimators needs matplotlib,
+and a headless fit should not pay for it.
 """
 
 from __future__ import annotations
@@ -187,7 +190,7 @@ def plot_comparison(rows: Sequence[dict], out: str, floor: Optional[float] = Non
     plt.close(fig)
 
 
-def plot_error_history(per_snapshot: dict, out: str, dt: float = 1 / 250.0):
+def plot_error_history(per_snapshot: dict, out: str, dt: float):
     """Per-snapshot NMSE against time, one line per method.
 
     A good mean score hiding a handful of catastrophic frames is a completely
@@ -208,7 +211,7 @@ def plot_error_history(per_snapshot: dict, out: str, dt: float = 1 / 250.0):
     plt.close(fig)
 
 
-def plot_horizon(curves: dict, out: str, dt: float = 1 / 250.0):
+def plot_horizon(curves: dict, out: str, dt: float):
     """Closed-loop forecast error against horizon, one line per forecaster.
 
     Report this, not the one-step error. Every forecaster ever built looks

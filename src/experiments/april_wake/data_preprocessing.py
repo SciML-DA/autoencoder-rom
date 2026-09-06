@@ -10,12 +10,11 @@ from __future__ import annotations
 import numpy as np
 from scipy import signal
 
-from tools.epod import split_train_test
+from field_estimation.epod import split_train_test
 
-from .wake_experiment import RUNS, build_case, concat_cases
+from .case_reader import RUNS, build_case, concat_cases
 
-__all__ = ["add_data_args", "probe_points", "apply_force_lag", "band_limit",
-           "load_data", "make_split"]
+__all__ = ["add_data_args", "probe_points", "apply_force_lag", "band_limit", "load_data", "make_split"]
 
 
 def add_data_args(parser) -> None:
@@ -33,59 +32,112 @@ def add_data_args(parser) -> None:
     d.add_argument("--stride", type=int, default=1)
     d.add_argument("--sync", default="block", choices=["block", "decimate", "nearest"])
     d.add_argument("--no-drift", action="store_true", help="skip drift correction")
-    d.add_argument("--force-smooth", type=int, default=0,
-                   help="moving-average window on the raw 2500 Hz force record")
-    d.add_argument("--notch", type=float, nargs="*", default=None, metavar="HZ",
-                   help="notch these frequencies out of the force record")
+    d.add_argument("--force-smooth", type=int, default=0, help="moving-average window on the raw 2500 Hz force record")
+    d.add_argument(
+        "--notch",
+        type=float,
+        nargs="*",
+        default=None,
+        metavar="HZ",
+        help="notch these frequencies out of the force record",
+    )
     d.add_argument("--notch-q", type=float, default=8.0, help="notch quality factor")
-    d.add_argument("--probes", type=int, nargs="*", default=None, metavar="IX IY",
-                   help="in-field velocity probes as explicit ix iy pairs")
-    d.add_argument("--n-probes", type=int, default=0,
-                   help="auto-place this many probes on valid fluid points; this "
-                        "stops the result being a force-only reconstruction")
-    d.add_argument("--lowres", action="store_true",
-                   help="read piv_snapshots/ rather than piv_snapshots_highres/. "
-                        "The reference notebook uses the low-resolution export "
-                        "(4950 points); the two are NOT row-for-row aligned and "
-                        "two runs have no lowres data at all.")
-    d.add_argument("--mask-tol", type=float, default=1.0, metavar="F",
-                   help="keep a grid point unless it is invalid in more than F "
-                        "of frames, filling what remains. The default 1.0 keeps "
-                        "the whole field, as the reference notebook does. Pass "
-                        "0.0 for the old strict rule, which discarded 63%% of "
-                        "this grid to remove a body of at most 112 points.")
-    d.add_argument("--mask-fill", default="interp", choices=["interp", "zero"],
-                   help="how kept points' gaps are filled. 'zero' reproduces "
-                        "the notebook's nan_to_num; 'interp' is better, because "
-                        "a zero is a measured value to an SVD and a gap is not.")
-    d.add_argument("--band-hz", type=float, nargs="+", default=None, metavar="HZ",
-                   help="restrict the FIELD TARGET to a frequency band: one "
-                        "value low-passes, two band-pass. The coherence puts "
-                        "the sensors' informative band at ~6-37 Hz, and "
-                        "variance outside it is label noise the loss cannot "
-                        "explain. Changes the claim, so the sweep reports the "
-                        "full-band score of the same prediction alongside.")
-    d.add_argument("--force-lag", type=int, default=0, metavar="N",
-                   help="re-time the force record by N PIV samples against the "
-                        "field before embedding. Negative N pairs each frame "
-                        "with force samples recorded LATER than the pairing "
-                        "says. Calibrate it with scripts/spectra.py or the lag "
-                        "scan in diagnose_sensors.py, and quote it with every "
-                        "score -- it moves NMSE by several percent.")
-    d.add_argument("--delay-ahead", type=int, default=0, metavar="K",
-                   help="also stack K FUTURE sensor samples, making the "
-                        "estimator two-sided. The causal embedding cannot reach "
-                        "a correlation that sits at negative lag, and the lag "
-                        "scan put the optimum at -25 samples. Set 0 only if the "
-                        "estimator has to run in real time.")
-    d.add_argument("--sensor-basis", default="pod", choices=["pod", "pls"],
-                   help="how sensor directions are ranked before truncation. "
-                        "'pod' by sensor variance (which the rig resonance "
-                        "wins); 'pls' by cross-covariance with the field.")
+    d.add_argument(
+        "--probes",
+        type=int,
+        nargs="*",
+        default=None,
+        metavar="IX IY",
+        help="in-field velocity probes as explicit ix iy pairs",
+    )
+    d.add_argument(
+        "--n-probes",
+        type=int,
+        default=0,
+        help="auto-place this many probes on valid fluid points; this "
+        "stops the result being a force-only reconstruction",
+    )
+    d.add_argument(
+        "--lowres",
+        action="store_true",
+        help="read piv_snapshots/ rather than piv_snapshots_highres/. "
+        "The reference notebook uses the low-resolution export "
+        "(4950 points); the two are NOT row-for-row aligned and "
+        "two runs have no lowres data at all.",
+    )
+    d.add_argument(
+        "--mask-tol",
+        type=float,
+        default=1.0,
+        metavar="F",
+        help="keep a grid point unless it is invalid in more than F "
+        "of frames, filling what remains. The default 1.0 keeps "
+        "the whole field, as the reference notebook does. Pass "
+        "0.0 for the old strict rule, which discarded 63%% of "
+        "this grid to remove a body of at most 112 points.",
+    )
+    d.add_argument(
+        "--mask-fill",
+        default="interp",
+        choices=["interp", "zero"],
+        help="how kept points' gaps are filled. 'zero' reproduces "
+        "the notebook's nan_to_num; 'interp' is better, because "
+        "a zero is a measured value to an SVD and a gap is not.",
+    )
+    d.add_argument(
+        "--band-hz",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="HZ",
+        help="restrict the FIELD TARGET to a frequency band: one "
+        "value low-passes, two band-pass. The coherence puts "
+        "the sensors' informative band at ~6-37 Hz, and "
+        "variance outside it is label noise the loss cannot "
+        "explain. Changes the claim, so the sweep reports the "
+        "full-band score of the same prediction alongside.",
+    )
+    d.add_argument(
+        "--force-lag",
+        type=int,
+        default=0,
+        metavar="N",
+        help="re-time the force record by N PIV samples against the "
+        "field before embedding. Negative N pairs each frame "
+        "with force samples recorded LATER than the pairing "
+        "says. Calibrate it with scripts/spectra.py or the lag "
+        "scan in diagnose_sensors.py, and quote it with every "
+        "score -- it moves NMSE by several percent.",
+    )
+    d.add_argument(
+        "--delay-ahead",
+        type=int,
+        default=0,
+        metavar="K",
+        help="also stack K FUTURE sensor samples, making the "
+        "estimator two-sided. The causal embedding cannot reach "
+        "a correlation that sits at negative lag, and the lag "
+        "scan put the optimum at -25 samples. Set 0 only if the "
+        "estimator has to run in real time.",
+    )
+    d.add_argument(
+        "--sensor-basis",
+        default="pod",
+        choices=["pod", "pls"],
+        help="how sensor directions are ranked before truncation. "
+        "'pod' by sensor variance (which the rig resonance "
+        "wins); 'pls' by cross-covariance with the field.",
+    )
     d.add_argument("--test-fraction", type=float, default=0.25)
     d.add_argument("--gap", type=int, default=100)
-    d.add_argument("--cross-yaw", nargs="?", const="", default=None, metavar="RUN",
-                   help="hold out a whole run instead of a time block")
+    d.add_argument(
+        "--cross-yaw",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="RUN",
+        help="hold out a whole run instead of a time block",
+    )
 
 
 def probe_points(flat):
@@ -143,22 +195,21 @@ def apply_force_lag(S, lag: int, run_id=None):
         raise ValueError(f"--force-lag {lag} is longer than the record ({n_t})")
 
     out = np.empty_like(S)
-    segs = ([np.arange(n_t)] if run_id is None
-            else [np.flatnonzero(run_id == k) for k in np.unique(run_id)])
+    segs = [np.arange(n_t)] if run_id is None else [np.flatnonzero(run_id == k) for k in np.unique(run_id)]
     for idx in segs:
         blk = S[:, idx]
         if lag > 0:  # column t takes S[t - lag]: pad at the start
-            out[:, idx] = np.concatenate(
-                [np.repeat(blk[:, :1], lag, axis=1), blk[:, :-lag]], axis=1)
-        else:        # column t takes S[t + |lag|]: pad at the end
+            out[:, idx] = np.concatenate([np.repeat(blk[:, :1], lag, axis=1), blk[:, :-lag]], axis=1)
+        else:  # column t takes S[t + |lag|]: pad at the end
             k = -lag
-            out[:, idx] = np.concatenate(
-                [blk[:, k:], np.repeat(blk[:, -1:], k, axis=1)], axis=1)
+            out[:, idx] = np.concatenate([blk[:, k:], np.repeat(blk[:, -1:], k, axis=1)], axis=1)
 
     side = "start" if lag > 0 else "end"
-    print(f"  force lag: {lag:+d} PIV samples "
-          f"({1e3 * lag / 250.0:+.1f} ms, {lag * 10:+d} force samples); "
-          f"{abs(lag)} frames edge-replicated at the {side} of each run")
+    print(
+        f"  force lag: {lag:+d} PIV samples "
+        f"({1e3 * lag / 250.0:+.1f} ms, {lag * 10:+d} force samples); "
+        f"{abs(lag)} frames edge-replicated at the {side} of each run"
+    )
     return out
 
 
@@ -213,9 +264,7 @@ def band_limit(Q, band, fs: float = 250.0, run_id=None, order: int = 4):
     band = [float(b) for b in np.atleast_1d(band)]
     nyq = fs / 2.0
     if len(band) not in (1, 2) or any(b <= 0 or b >= nyq for b in band):
-        raise ValueError(
-            f"band must be one or two frequencies in (0, {nyq}), got {band}"
-        )
+        raise ValueError(f"band must be one or two frequencies in (0, {nyq}), got {band}")
     if len(band) == 2 and band[0] >= band[1]:
         raise ValueError(f"band must be increasing, got {band}")
 
@@ -223,24 +272,19 @@ def band_limit(Q, band, fs: float = 250.0, run_id=None, order: int = 4):
         sos = signal.butter(order, band[0] / nyq, btype="low", output="sos")
         what = f"low-pass {band[0]:g} Hz"
     else:
-        sos = signal.butter(order, [band[0] / nyq, band[1] / nyq],
-                            btype="band", output="sos")
+        sos = signal.butter(order, [band[0] / nyq, band[1] / nyq], btype="band", output="sos")
         what = f"band-pass {band[0]:g}-{band[1]:g} Hz"
 
     out = np.empty_like(Q)
-    segs = ([np.arange(Q.shape[1])] if run_id is None
-            else [np.flatnonzero(run_id == k) for k in np.unique(run_id)])
+    segs = [np.arange(Q.shape[1])] if run_id is None else [np.flatnonzero(run_id == k) for k in np.unique(run_id)]
     for idx in segs:
         blk = Q[:, idx]
         if blk.shape[1] <= 3 * order * 3:
-            raise ValueError(
-                f"run segment of {blk.shape[1]} snapshots is too short to filter"
-            )
+            raise ValueError(f"run segment of {blk.shape[1]} snapshots is too short to filter")
         out[:, idx] = signal.sosfiltfilt(sos, blk, axis=1)
 
     kept = float(np.var(out)) / max(float(np.var(Q)), 1e-30)
-    print(f"  band: {what} (zero-phase, order {order}); "
-          f"{100 * kept:.1f}% of the field variance kept")
+    print(f"  band: {what} (zero-phase, order {order}); {100 * kept:.1f}% of the field variance kept")
     return out
 
 
@@ -257,15 +301,24 @@ def load_data(args):
         labels each column with its source run.
     """
     runs = args.runs or [args.run]
-    cases = [build_case(r, n_snapshots=args.n, stride=args.stride,
-                        highres=not getattr(args, "lowres", False),
-                        sync_method=args.sync, drift_correct=not args.no_drift,
-                        force_smooth=args.force_smooth, notch=args.notch,
-                        notch_q=args.notch_q, probes=probe_points(args.probes),
-                        n_probes=args.n_probes,
-                        mask_tol=getattr(args, "mask_tol", 1.0),
-                        mask_fill=getattr(args, "mask_fill", "interp"))
-             for r in runs]
+    cases = [
+        build_case(
+            r,
+            n_snapshots=args.n,
+            stride=args.stride,
+            highres=not getattr(args, "lowres", False),
+            sync_method=args.sync,
+            drift_correct=not args.no_drift,
+            force_smooth=args.force_smooth,
+            notch=args.notch,
+            notch_q=args.notch_q,
+            probes=probe_points(args.probes),
+            n_probes=args.n_probes,
+            mask_tol=getattr(args, "mask_tol", 1.0),
+            mask_fill=getattr(args, "mask_fill", "interp"),
+        )
+        for r in runs
+    ]
     case0 = cases[0]
 
     if len(cases) == 1:
@@ -284,8 +337,7 @@ def load_data(args):
 
     S = apply_force_lag(S, getattr(args, "force_lag", 0), run_id)
 
-    print(f"\n  Q {Q.shape}  S {S.shape}  ({len(cases)} run(s), "
-          f"{Q.nbytes / 1e9:.2f} GB field)")
+    print(f"\n  Q {Q.shape}  S {S.shape}  ({len(cases)} run(s), {Q.nbytes / 1e9:.2f} GB field)")
     return Q.astype(np.float64), S.astype(np.float64), unflat, case0, run_id, cases
 
 
@@ -340,8 +392,7 @@ def make_split(args, n_t, run_id, cases):
     # both sides. `--cross-yaw` answers the harder question of generalising to a
     # yaw never seen. They are different experiments and neither substitutes.
     keys = list(np.unique(run_id))
-    bounds = [(int(np.flatnonzero(run_id == k)[0]),
-               int(np.flatnonzero(run_id == k)[-1]) + 1) for k in keys]
+    bounds = [(int(np.flatnonzero(run_id == k)[0]), int(np.flatnonzero(run_id == k)[-1]) + 1) for k in keys]
 
     tr_parts, te_parts = [], []
     for k, (s0, e0) in zip(keys, bounds):
@@ -354,12 +405,12 @@ def make_split(args, n_t, run_id, cases):
         te_parts.append(b + s0)
         if len(keys) > 1:
             name = cases[int(k)].run if int(k) < len(cases) else f"run {k}"
-            print(f"    {name}: train {len(a)}, test {len(b)}  "
-                  f"(of {n} snapshots)")
+            print(f"    {name}: train {len(a)}, test {len(b)}  (of {n} snapshots)")
     tr = np.concatenate(tr_parts)
     te = np.concatenate(te_parts)
 
-    print(f"  split: train {len(tr)}, test {len(te)} over {len(keys)} run(s), "
-          f"gap {gap}, warmup {warmup}"
-          + (f", cooldown {cooldown}" if cooldown else ""))
+    print(
+        f"  split: train {len(tr)}, test {len(te)} over {len(keys)} run(s), "
+        f"gap {gap}, warmup {warmup}" + (f", cooldown {cooldown}" if cooldown else "")
+    )
     return tr, te, ""

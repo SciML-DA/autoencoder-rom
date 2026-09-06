@@ -31,7 +31,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
-import datasets.wake_experiment as we  # noqa: E402
+import experiments.april_wake.case_reader as we  # noqa: E402
 from test_sparse_sensors import _write_fixture  # noqa: E402
 
 

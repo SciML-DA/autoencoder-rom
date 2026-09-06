@@ -5,7 +5,7 @@ measurements into the latent space:
 
     y = E(phi),  phi_hat = D(y),  y_hat = G(s),  phi_hat = D(G(s))
 
-POD-LSE in `tools/epod.py` is the same architecture with `E`, `D`, and `G` all
+POD-LSE in `epod.py` is the same architecture with `E`, `D`, and `G` all
 linear.
 
 `E` and `D` arrive as a `LatentSpace` — `LinearLatent` for a POD basis,
@@ -39,8 +39,8 @@ then optionally fine-tune end to end.
 
 Typical usage:
 
-    from tools.branched_ae import LinearLatent, BranchedAE
-    from tools.epod import pod, split_train_test
+    from field_estimation.branched_ae import LinearLatent, BranchedAE
+    from field_estimation.epod import pod, split_train_test
 
     tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)
     Psi, _, _, q_mean = pod(Q[:, tr], r=64, subtract_mean=True,
@@ -358,7 +358,7 @@ class BranchedAE:
     """Trains the sensor branch `G` against a frozen `E`/`D` pair.
 
     Exposes `fit`, `encode`, `predict`, and `score`, matching
-    `tools.epod.PODLSE` so both classes fit into one comparison loop. The
+    `field_estimation.epod.PODLSE` so both classes fit into one comparison loop. The
     windows are causal, so each method takes the whole record plus an index
     array rather than a pre-sliced block:
 
@@ -754,7 +754,7 @@ class LatentForecaster:
         s_{t-L..t} --G--> y_t --F--> y_{t+1..t+h} --D--> phi_{t+1..t+h}
 
     Trains on latent trajectories only, so it is independent of the sensors and
-    the decoder, and the ESN in `tools/esn_core.py` can replace it without
+    the decoder, and `echostatenetwork.EchoStateNetwork` can replace it without
     changes elsewhere.
 
     Set `n_unroll` above 1. Unrolling feeds predictions back during training,

@@ -10,7 +10,7 @@ import matplotlib.colors as colors
 import numpy as np
 from typing import Optional
 
-from utils import get_figsize_based_on_domain
+from .figures import get_figsize_based_on_domain
 
 from matplotlib.gridspec import GridSpec
 from pyts.image import RecurrencePlot

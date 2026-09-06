@@ -44,9 +44,9 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.sparse_sensors import add_data_args, load_data, make_split  # noqa: E402
-from datasets.wake_experiment import F_FORCE_HZ, F_PIV_HZ, RUNS  # noqa: E402
-from tools.epod import PODLSE, delay_embed, nmse, pod  # noqa: E402
+from experiments.april_wake.data_preprocessing import add_data_args, load_data, make_split  # noqa: E402
+from experiments.april_wake.case_reader import F_FORCE_HZ, F_PIV_HZ, RUNS  # noqa: E402
+from field_estimation.epod import PODLSE, delay_embed, nmse, pod  # noqa: E402
 
 
 def rule(t):
@@ -92,10 +92,8 @@ def check_mask(args, case0):
     always = frac_bad >= 1.0
 
     print(f"  grid                      : {nx} x {ny} = {n_pix} points, {nt} frames")
-    print(f"  invalid in EVERY frame    : {always.sum():>6d}  ({always.mean():.1%})"
-          "   <- the solid body")
-    print(f"  invalid in ANY frame      : {ever.sum():>6d}  ({ever.mean():.1%})"
-          "   <- what the pipeline drops")
+    print(f"  invalid in EVERY frame    : {always.sum():>6d}  ({always.mean():.1%})   <- the solid body")
+    print(f"  invalid in ANY frame      : {ever.sum():>6d}  ({ever.mean():.1%})   <- what the pipeline drops")
     print(f"  mean per-frame invalid    : {frac_bad.mean():.2%} of the grid")
     print(f"  worst point               : invalid in {frac_bad.max():.1%} of frames\n")
 
@@ -138,8 +136,7 @@ def check_observability(Q, S, tr, te, args):
     """
     rule("2. honest observability (fit on train, measured on test)")
     r = args.r_field
-    Psi, Sigma, B, qm = pod(Q[:, tr], r=r, subtract_mean=True,
-                            method=args.pod_method)
+    Psi, Sigma, B, qm = pod(Q[:, tr], r=r, subtract_mean=True, method=args.pod_method)
     B_te = Psi.T @ (Q[:, te] - qm)
 
     Sd = delay_embed(S, args.n_delays, 1, args.delay_ahead)
@@ -194,8 +191,7 @@ def check_ceiling(rho2_te, energy, observed):
     contrib = energy * np.clip(rho2_te, 0, 1)
     ceiling = 1.0 - contrib.sum()
     top3 = 1.0 - contrib[:3].sum()
-    print(f"  modes analysed carry               : {energy.sum():.4f} of the "
-          "total fluctuation energy")
+    print(f"  modes analysed carry               : {energy.sum():.4f} of the total fluctuation energy")
     print(f"  energy-weighted explained fraction : {contrib.sum():.4f}")
     print(f"  implied best-possible test NMSE    : {ceiling:.4f}")
     print(f"  ...using only the top 3 modes      : {top3:.4f}")
@@ -229,16 +225,14 @@ def check_lag(Q, S, tr, te, args):
     """
     rule("4. lag scan (PIV/force alignment)")
     r = 8  # leading modes only: they carry the signal and the scan stays fast
-    Psi, _, B, qm = pod(Q[:, tr], r=r, subtract_mean=True,
-                        method=args.pod_method)
+    Psi, _, B, qm = pod(Q[:, tr], r=r, subtract_mean=True, method=args.pod_method)
 
     lags = np.arange(-args.max_lag, args.max_lag + 1, args.lag_step)
     out = []
     for lag in lags:
         Ss = np.roll(S, lag, axis=1)
         Sd = delay_embed(Ss, args.n_delays, 1, args.delay_ahead)
-        m = PODLSE(r_field=r, r_sensor=None, ridge=args.ridge,
-                   pod_method=args.pod_method).fit(Q[:, tr], Sd[:, tr])
+        m = PODLSE(r_field=r, r_sensor=None, ridge=args.ridge, pod_method=args.pod_method).fit(Q[:, tr], Sd[:, tr])
         out.append(nmse(Q[:, te], m.predict(Sd[:, te])))
     out = np.array(out)
     best = int(np.argmin(out))
@@ -247,8 +241,7 @@ def check_lag(Q, S, tr, te, args):
     for lg, v in zip(lags, out):
         mark = "  <- best" if lg == lags[best] else ""
         print(f"  {lg:>6d} {1e3 * lg / F_PIV_HZ:>8.1f} {v:>11.4f}{mark}")
-    print(f"\n  best lag        : {lags[best]:+d} samples "
-          f"({1e3 * lags[best] / F_PIV_HZ:+.1f} ms)")
+    print(f"\n  best lag        : {lags[best]:+d} samples ({1e3 * lags[best] / F_PIV_HZ:+.1f} ms)")
     print(f"  NMSE at lag 0   : {out[np.where(lags == 0)[0][0]]:.4f}")
     print(f"  NMSE at best lag: {out[best]:.4f}")
     # Judge on effect size, not on argmin. With 1521 test snapshots the scan is
@@ -260,13 +253,17 @@ def check_lag(Q, S, tr, te, args):
     gain = at0 - out[best]
     rel = gain / at0 if at0 > 0 else 0.0
     if lags[best] == 0 or rel < 0.02:
-        print(f"\n  Pairing confirmed: shifting to the best lag buys "
-              f"{gain:+.4f} NMSE ({rel:+.1%}), which is noise at this test size.")
+        print(
+            f"\n  Pairing confirmed: shifting to the best lag buys "
+            f"{gain:+.4f} NMSE ({rel:+.1%}), which is noise at this test size."
+        )
         print("     The alignment is not the problem.")
     else:
-        print(f"\n  !! The pairing is off by {lags[best]} PIV samples "
-              f"({lags[best] * int(F_FORCE_HZ / F_PIV_HZ)} force samples), "
-              f"worth {rel:.1%} NMSE.")
+        print(
+            f"\n  !! The pairing is off by {lags[best]} PIV samples "
+            f"({lags[best] * int(F_FORCE_HZ / F_PIV_HZ)} force samples), "
+            f"worth {rel:.1%} NMSE."
+        )
         print("     Fix force_index_for_pair before trusting any other number.")
     return lags, out
 
@@ -296,16 +293,16 @@ def check_leak(Q, S, args, rng):
 
     res = {}
     for name, (a, b) in (("contiguous", (tr_c, te_c)), ("random", (tr_r, te_r))):
-        m = PODLSE(r_field=args.r_field, r_sensor=None, ridge=args.ridge,
-                   pod_method=args.pod_method)
+        m = PODLSE(r_field=args.r_field, r_sensor=None, ridge=args.ridge, pod_method=args.pod_method)
         m.fit(Q[:, a], Sd[:, a])
         res[name] = nmse(Q[:, b], m.predict(Sd[:, b]))
-        print(f"  {name:>11} split: test NMSE {res[name]:.4f}  "
-              f"({len(a)} train / {len(b)} test)")
+        print(f"  {name:>11} split: test NMSE {res[name]:.4f}  ({len(a)} train / {len(b)} test)")
 
-    print(f"\n  random split flatters the same model by "
-          f"{res['contiguous'] - res['random']:+.4f} NMSE "
-          f"({100 * (1 - res['random'] / res['contiguous']):.0f}% better)")
+    print(
+        f"\n  random split flatters the same model by "
+        f"{res['contiguous'] - res['random']:+.4f} NMSE "
+        f"({100 * (1 - res['random'] / res['contiguous']):.0f}% better)"
+    )
     if res["random"] < 0.6 * res["contiguous"]:
         print("  That is a large leak. Any reference number obtained from a random")
         print("  split is not comparable to these -- check how the baseline split")
@@ -350,8 +347,7 @@ def check_force_spectrum(S, out_dir, args):
     for c in range(S.shape[0]):
         ax.loglog(f[1:], P[c][1:], lw=0.8, alpha=0.75, label=f"ch {c}")
     ax.axvline(st_f, c="k", ls="--", lw=1.2)
-    ax.annotate(f"St=0.17 -> {st_f:.0f} Hz", (st_f, ax.get_ylim()[1]),
-                fontsize=8, rotation=90, ha="right", va="top")
+    ax.annotate(f"St=0.17 -> {st_f:.0f} Hz", (st_f, ax.get_ylim()[1]), fontsize=8, rotation=90, ha="right", va="top")
     ax.set(xlabel="frequency [Hz]", ylabel="PSD", title="force channels, PIV-rate")
     ax.legend(fontsize=6, ncol=3)
     ax.grid(alpha=0.3, which="both")
@@ -366,8 +362,7 @@ def check_force_spectrum(S, out_dir, args):
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_data_args(p)
     p.add_argument("--r-field", type=int, default=64)
     p.add_argument("--n-delays", type=int, default=25)
@@ -375,21 +370,24 @@ def main() -> int:
     # though this script never sweeps them
     p.add_argument("--delay-stride", type=int, default=1)
     p.add_argument("--ridge", type=float, default=1e-4)
-    p.add_argument("--observed", type=float, default=0.8281,
-                   help="best test NMSE from the sweep, for the ceiling comparison")
-    p.add_argument("--pod-method", default="randomized",
-                   choices=["svd", "snapshot", "randomized", "auto"],
-                   help="POD algorithm. The lag scan refits once per candidate "
-                        "lag, and `pod` defaults to a full dense SVD -- which "
-                        "at the real problem size is 50 s a fit, so 161 lags is "
-                        "2.2 h and job 3936955 was killed at the walltime doing "
-                        "exactly that. Randomized is 1.3 s for the same leading "
-                        "modes and is already what the study and sweep use.")
+    p.add_argument(
+        "--observed", type=float, default=0.8281, help="best test NMSE from the sweep, for the ceiling comparison"
+    )
+    p.add_argument(
+        "--pod-method",
+        default="randomized",
+        choices=["svd", "snapshot", "randomized", "auto"],
+        help="POD algorithm. The lag scan refits once per candidate "
+        "lag, and `pod` defaults to a full dense SVD -- which "
+        "at the real problem size is 50 s a fit, so 161 lags is "
+        "2.2 h and job 3936955 was killed at the walltime doing "
+        "exactly that. Randomized is 1.3 s for the same leading "
+        "modes and is already what the study and sweep use.",
+    )
     p.add_argument("--max-lag", type=int, default=40)
     p.add_argument("--lag-step", type=int, default=5)
     p.add_argument("--show-modes", type=int, default=20)
-    p.add_argument("--skip", nargs="*", default=[],
-                   choices=["mask", "obs", "lag", "leak", "spectrum"])
+    p.add_argument("--skip", nargs="*", default=[], choices=["mask", "obs", "lag", "leak", "spectrum"])
     p.add_argument("--out", default="results/diagnosis")
     args = p.parse_args()
     args.delays = [args.n_delays]

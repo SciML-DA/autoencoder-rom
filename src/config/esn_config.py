@@ -5,13 +5,62 @@ import yaml
 from pathlib import Path
 import hashlib
 import json
-from utils import get_project_root, convert_to_python_type
+import os
 
 from models.data_driven import ESN_model
 
-ROOT = get_project_root()
+# This directory. Derived from ``__file__`` rather than by walking up from the
+# cwd looking for a ``src``/``dev`` folder, as the former top-level ``utils.py``
+# did: that lookup depended on where the process was started and had a hardcoded
+# ``real_public`` branch belonging to another repository's layout. The configs
+# live next to this module either way, so the path is not a search problem.
+BASE_CONFIG_DIR = Path(__file__).resolve().parent
 
-BASE_CONFIG_DIR = f"{ROOT}/src/config" if ROOT is not None else "config"
+
+def convert_to_python_type(obj, *, float_ndigits=12):
+    """Convert numpy types to native Python types, with canonical float rounding.
+
+    Canonical because the result is what gets hashed and written to YAML: two
+    configs that differ only in numpy dtype or in float noise beyond
+    ``float_ndigits`` must produce the same hash, or `find_matching_config`
+    refits an ESN it already has on disk.
+
+    Moved here from the former top-level ``utils.py`` (A. Nóvoa), whose only
+    caller was this module.
+    """
+    if obj is None:
+        return "none"
+
+    if isinstance(obj, np.generic):
+        if np.issubdtype(type(obj), np.integer):
+            return int(obj)
+        elif np.issubdtype(type(obj), np.floating):
+            return round(float(obj), float_ndigits)
+        elif np.issubdtype(type(obj), np.bool_):
+            return bool(obj)
+        elif np.issubdtype(type(obj), np.complexfloating):
+            c = complex(obj)
+            return (round(c.real, float_ndigits), round(c.imag, float_ndigits))
+        else:
+            return obj.item()
+
+    elif isinstance(obj, float):
+        return round(obj, float_ndigits)
+
+    elif isinstance(obj, np.ndarray):
+        return [convert_to_python_type(x, float_ndigits=float_ndigits) for x in obj.tolist()]
+    elif isinstance(obj, tuple):
+        return [convert_to_python_type(item, float_ndigits=float_ndigits) for item in obj]
+    elif isinstance(obj, list):
+        return [convert_to_python_type(item, float_ndigits=float_ndigits) for item in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_to_python_type(v, float_ndigits=float_ndigits) for k, v in obj.items()}
+
+    # if Path, change to string
+    elif isinstance(obj, os.PathLike):
+        return str(obj)
+
+    return obj
 
 INIT_KEYS = [  # fixed hyperparameter settings
     "N_units",

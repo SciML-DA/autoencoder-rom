@@ -25,7 +25,7 @@ modes to be unreliable.
 
 Typical usage:
 
-    from tools.epod_jax import PODLSEJax
+    from field_estimation.epod_jax import PODLSEJax
 
     model = PODLSEJax(r_field=64, r_sensor=None, ridge=1e-4).fit(Q_tr, S_tr)
     model.score(Q_te, S_te)

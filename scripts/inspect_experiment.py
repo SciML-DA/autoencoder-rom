@@ -5,7 +5,7 @@ inspect_experiment.py
 
 One-shot survey of the April experiment on RDS. Run this first, on cx3.
 
-It validates everything `datasets.wake_experiment` assumes -- grid orientation,
+It validates everything `experiments.april_wake.case_reader` assumes -- grid orientation,
 mask polarity, NaN convention, calibration consistency -- and resolves the one
 thing still unknown from the documentation: the layout of the force `.dat`
 files. Everything it prints is either a check that must pass or a number the
@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import numpy as np  # noqa: E402
 
-from datasets.wake_experiment import (  # noqa: E402
+from experiments.april_wake.case_reader import (  # noqa: E402
     F_FORCE_HZ,
     F_PIV_HZ,
     FORCE_PER_PIV,

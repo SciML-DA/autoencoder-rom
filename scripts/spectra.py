@@ -63,8 +63,8 @@ from scipy import signal  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.sparse_sensors import add_data_args, load_data, make_split  # noqa: E402
-from datasets.wake_experiment import (  # noqa: E402
+from experiments.april_wake.data_preprocessing import add_data_args, load_data, make_split  # noqa: E402
+from experiments.april_wake.case_reader import (  # noqa: E402
     F_FORCE_HZ,
     F_PIV_HZ,
     RUNS,
@@ -74,14 +74,14 @@ from datasets.wake_experiment import (  # noqa: E402
     read_dat,
     yaw_from_run,
 )
-from tools.epod import pod  # noqa: E402
+from field_estimation.epod import pod  # noqa: E402
 
 # Channel names, in the order read_dat returns them: two six-component
 # balances. Used for labels only -- nothing keys off them.
 CH = [f"{d}{c}" for d in ("d2", "d3") for c in ("Fx", "Fy", "Fz", "Mx", "My", "Mz")]
 
 D_DISC = 0.0495  # porous disc diameter [m]
-U_INF = 10.0     # tunnel speed for the 10ms runs [m/s]
+U_INF = 10.0  # tunnel speed for the 10ms runs [m/s]
 
 
 def rule(t):
@@ -124,18 +124,14 @@ def section_raw_spectrum(F, fname, out, args):
     rule("1. force spectra at the acquisition rate (2500 Hz)")
     st_f = args.strouhal * U_INF / D_DISC
     nper = min(args.nperseg_force, F.shape[1])
-    f, P = signal.welch(F - F.mean(1, keepdims=True), fs=F_FORCE_HZ,
-                        nperseg=nper, noverlap=nper // 2, axis=1)
+    f, P = signal.welch(F - F.mean(1, keepdims=True), fs=F_FORCE_HZ, nperseg=nper, noverlap=nper // 2, axis=1)
 
     nyq = F_PIV_HZ / 2
     print(f"  file               : {fname}")
-    print(f"  record             : {F.shape[1]} samples "
-          f"({F.shape[1] / F_FORCE_HZ:.1f} s)")
-    print(f"  resolution         : {f[1] - f[0]:.2f} Hz "
-          f"({2 * F.shape[1] // nper - 1} Welch segments)")
+    print(f"  record             : {F.shape[1]} samples ({F.shape[1] / F_FORCE_HZ:.1f} s)")
+    print(f"  resolution         : {f[1] - f[0]:.2f} Hz ({2 * F.shape[1] // nper - 1} Welch segments)")
     print(f"  expected shedding  : {st_f:.1f} Hz (St={args.strouhal})")
-    print(f"  PIV Nyquist        : {nyq:.0f} Hz -- everything above this folds "
-          "down when the record is decimated\n")
+    print(f"  PIV Nyquist        : {nyq:.0f} Hz -- everything above this folds down when the record is decimated\n")
 
     band = f > 1.0
     above = f > nyq
@@ -145,12 +141,16 @@ def section_raw_spectrum(F, fname, out, args):
         pk = f[band][np.argmax(P[c][band])]
         ratio = P[c][band].max() / np.median(P[c][band])
         frac = P[c][above].sum() / P[c][band].sum()
-        note = ("at the shedding frequency" if abs(pk - st_f) < 5 else
-                "sharp peak, structural" if ratio > 50 else "broadband")
+        note = (
+            "at the shedding frequency"
+            if abs(pk - st_f) < 5
+            else "sharp peak, structural"
+            if ratio > 50
+            else "broadband"
+        )
         if frac > 0.5:
             note += "; MOST of its power aliases"
-        print(f"  {ch_name(c, F.shape[0]):>6} {pk:>9.1f} {ratio:>9.0f} "
-              f"{100 * frac:>12.1f}%   {note}")
+        print(f"  {ch_name(c, F.shape[0]):>6} {pk:>9.1f} {ratio:>9.0f} {100 * frac:>12.1f}%   {note}")
         rows.append((pk, ratio, frac))
 
     fig, axes = plt.subplots(4, 3, figsize=(14, 11), sharex=True, sharey=True)
@@ -161,12 +161,12 @@ def section_raw_spectrum(F, fname, out, args):
         ax.loglog(f[1:], P[c][1:], lw=0.8, c="C0")
         ax.axvline(nyq, c="r", ls="-", lw=1.0)
         ax.axvline(st_f, c="k", ls="--", lw=1.0)
-        ax.set_title(f"{ch_name(c, F.shape[0])}  peak {rows[c][0]:.0f} Hz",
-                     fontsize=9)
+        ax.set_title(f"{ch_name(c, F.shape[0])}  peak {rows[c][0]:.0f} Hz", fontsize=9)
         ax.grid(alpha=0.3, which="both")
     axes[0, 0].set_ylabel("PSD")
-    fig.suptitle(f"force channels at {F_FORCE_HZ:.0f} Hz   "
-                 f"(red = PIV Nyquist {nyq:.0f} Hz, dashed = St={args.strouhal})")
+    fig.suptitle(
+        f"force channels at {F_FORCE_HZ:.0f} Hz   (red = PIV Nyquist {nyq:.0f} Hz, dashed = St={args.strouhal})"
+    )
     fig.supxlabel("frequency [Hz]")
     fig.tight_layout()
     _save(fig, out, "force_spectra_raw.png")
@@ -186,25 +186,20 @@ def section_piv_rate(S, B, energy, out, args):
 
     n_seg = 2 * S.shape[1] // nper - 1
     print(f"  resolution         : {f[1] - f[0]:.2f} Hz, {n_seg} Welch segments")
-    print(f"  shedding           : {st_f:.1f} Hz     "
-          f"meandering (St~0.075): {0.075 * U_INF / D_DISC:.1f} Hz\n")
+    print(f"  shedding           : {st_f:.1f} Hz     meandering (St~0.075): {0.075 * U_INF / D_DISC:.1f} Hz\n")
 
-    print(f"  {'mode':>5} {'energy':>8} {'peak Hz':>9} {'St':>7}   "
-          "half the mode's power below")
+    print(f"  {'mode':>5} {'energy':>8} {'peak Hz':>9} {'St':>7}   half the mode's power below")
     for k in range(min(B.shape[0], args.show_modes)):
         p = Pb[k][1:]
         pk = f[1:][np.argmax(p)]
         cum = np.cumsum(p) / p.sum()
         f50 = f[1:][np.searchsorted(cum, 0.5)]
-        print(f"  {k + 1:>5} {energy[k]:>8.4f} {pk:>9.2f} "
-              f"{pk * D_DISC / U_INF:>7.3f}   {f50:.1f} Hz")
+        print(f"  {k + 1:>5} {energy[k]:>8.4f} {pk:>9.2f} {pk * D_DISC / U_INF:>7.3f}   {f50:.1f} Hz")
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 5))
     for c in range(S.shape[0]):
-        a1.loglog(f[1:], Ps[c][1:], lw=0.8, alpha=0.8,
-                  label=ch_name(c, S.shape[0]))
-    a1.set(title="force channels, PIV rate", xlabel="frequency [Hz]",
-           ylabel="PSD")
+        a1.loglog(f[1:], Ps[c][1:], lw=0.8, alpha=0.8, label=ch_name(c, S.shape[0]))
+    a1.set(title="force channels, PIV rate", xlabel="frequency [Hz]", ylabel="PSD")
     a1.legend(fontsize=6, ncol=2)
     for k in range(min(B.shape[0], 8)):
         a2.loglog(f[1:], Pb[k][1:], lw=1.0, label=f"mode {k + 1}")
@@ -243,11 +238,9 @@ def section_coherence(S, B, out, args):
     n_seg = 2 * S.shape[1] // nper - 1
     p = S.shape[0]
 
-    print(f"  segments (n_seg)   : {n_seg} of {nper} samples "
-          f"({f'{F_PIV_HZ / nper:.2f}'} Hz resolution)")
+    print(f"  segments (n_seg)   : {n_seg} of {nper} samples ({f'{F_PIV_HZ / nper:.2f}'} Hz resolution)")
     print(f"  inputs (p)         : {p}")
-    print(f"  bias on a null estimate: {p / n_seg:.3f} multiple, "
-          f"{1 / n_seg:.3f} ordinary")
+    print(f"  bias on a null estimate: {p / n_seg:.3f} multiple, {1 / n_seg:.3f} ordinary")
     if n_seg < 3 * p:
         print(f"  !! n_seg < 3p. The bias correction is doing too much work to be")
         print(f"     trusted at face value -- rerun with --nperseg {nper // 2}.")
@@ -298,51 +291,54 @@ def section_coherence(S, B, out, args):
     w = Sbb / np.where(Sbb.sum(1, keepdims=True) > 0, Sbb.sum(1, keepdims=True), 1)
     per_mode = (mult_c * w).sum(1)
 
-    print(f"\n  {'mode':>5} {'gamma2 peak':>12} {'at Hz':>8} "
-          f"{'power-weighted':>15}   band where gamma2 > 0.2")
+    print(f"\n  {'mode':>5} {'gamma2 peak':>12} {'at Hz':>8} {'power-weighted':>15}   band where gamma2 > 0.2")
     for k in range(n_mode):
         i = int(np.argmax(mult_c[k]))
         hot = f[mult_c[k] > 0.2]
         rng = f"{hot.min():.1f}-{hot.max():.1f} Hz" if hot.size else "(none)"
-        print(f"  {k + 1:>5} {mult_c[k][i]:>12.3f} {f[i]:>8.1f} "
-              f"{per_mode[k]:>15.3f}   {rng}")
+        print(f"  {k + 1:>5} {mult_c[k][i]:>12.3f} {f[i]:>8.1f} {per_mode[k]:>15.3f}   {rng}")
 
     best = np.unravel_index(np.argmax(ord_c), ord_c.shape)
-    print(f"\n  best single channel  : {ch_name(best[0], p)} against mode "
-          f"{best[1] + 1}, gamma2 {ord_c[best]:.3f} at {f[best[2]]:.1f} Hz")
+    print(
+        f"\n  best single channel  : {ch_name(best[0], p)} against mode "
+        f"{best[1] + 1}, gamma2 {ord_c[best]:.3f} at {f[best[2]]:.1f} Hz"
+    )
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 9))
     ax = axes[0, 0]
     for k in range(min(n_mode, 6)):
         ax.semilogx(f[1:], mult_c[k][1:], lw=1.2, label=f"mode {k + 1}")
     ax.axhline(p / n_seg, c="r", ls=":", lw=1.2, label="chance (uncorrected)")
-    ax.set(title="multiple coherence: all 12 channels vs each mode",
-           xlabel="frequency [Hz]", ylabel=r"$\gamma^2$", ylim=(0, 1))
+    ax.set(
+        title="multiple coherence: all 12 channels vs each mode",
+        xlabel="frequency [Hz]",
+        ylabel=r"$\gamma^2$",
+        ylim=(0, 1),
+    )
     ax.legend(fontsize=7, ncol=2)
 
     ax = axes[0, 1]
-    im = ax.pcolormesh(f, np.arange(1, n_mode + 1), mult_c, shading="nearest",
-                       cmap="magma", vmin=0, vmax=min(1, mult_c.max() * 1.05))
-    ax.set(title="multiple coherence", xlabel="frequency [Hz]", ylabel="POD mode",
-           xscale="log")
+    im = ax.pcolormesh(
+        f, np.arange(1, n_mode + 1), mult_c, shading="nearest", cmap="magma", vmin=0, vmax=min(1, mult_c.max() * 1.05)
+    )
+    ax.set(title="multiple coherence", xlabel="frequency [Hz]", ylabel="POD mode", xscale="log")
     fig.colorbar(im, ax=ax, label=r"$\gamma^2$")
 
     ax = axes[1, 0]
-    im = ax.pcolormesh(f, np.arange(p), ord_c[:, 0, :], shading="nearest",
-                       cmap="magma", vmin=0)
-    ax.set(title="ordinary coherence, each channel vs mode 1",
-           xlabel="frequency [Hz]", ylabel="channel", xscale="log")
+    im = ax.pcolormesh(f, np.arange(p), ord_c[:, 0, :], shading="nearest", cmap="magma", vmin=0)
+    ax.set(title="ordinary coherence, each channel vs mode 1", xlabel="frequency [Hz]", ylabel="channel", xscale="log")
     ax.set_yticks(np.arange(p))
     ax.set_yticklabels([ch_name(c, p) for c in range(p)], fontsize=7)
     fig.colorbar(im, ax=ax, label=r"$\gamma^2$")
 
     ax = axes[1, 1]
     for k in range(min(n_mode, 6)):
-        ax.semilogx(f[1:], Sbb[k][1:] / Sbb[k][1:].max(), lw=1.0,
-                    label=f"mode {k + 1}")
-    ax.set(title="mode PSD (normalised) -- where the energy the coherence\n"
-                 "has to explain actually is", xlabel="frequency [Hz]",
-           ylabel="PSD / max")
+        ax.semilogx(f[1:], Sbb[k][1:] / Sbb[k][1:].max(), lw=1.0, label=f"mode {k + 1}")
+    ax.set(
+        title="mode PSD (normalised) -- where the energy the coherence\nhas to explain actually is",
+        xlabel="frequency [Hz]",
+        ylabel="PSD / max",
+    )
     ax.set_yscale("log")
     ax.legend(fontsize=7, ncol=2)
     for a in axes.ravel():
@@ -385,7 +381,7 @@ def section_band_ceiling(f, mult_c, Sbb, energy, observed, out):
     # spectrum to a distribution over frequency first; E_k then carries the
     # energy exactly once.
     tot_k = Sbb.sum(axis=1, keepdims=True)
-    P = Sbb / np.where(tot_k > 0, tot_k, 1.0)          # each row sums to 1
+    P = Sbb / np.where(tot_k > 0, tot_k, 1.0)  # each row sums to 1
 
     unexp = np.cumsum(P * (1 - mult_c) * E[:, None], axis=1).sum(0) + tail
     total = np.cumsum(P * E[:, None], axis=1).sum(0) + tail
@@ -428,11 +424,14 @@ def section_band_ceiling(f, mult_c, Sbb, energy, observed, out):
     if observed is not None:
         a1.axhline(observed, c="k", ls="--", lw=1.2, label="best sweep NMSE")
         a1.legend(fontsize=8)
-    a1.set(title="best-possible NMSE for a target low-passed at $f_c$",
-           xlabel="cutoff $f_c$ [Hz]", ylabel="NMSE floor", ylim=(0, 1))
+    a1.set(
+        title="best-possible NMSE for a target low-passed at $f_c$",
+        xlabel="cutoff $f_c$ [Hz]",
+        ylabel="NMSE floor",
+        ylim=(0, 1),
+    )
     a2.semilogx(f[1:], 100 * covered[1:], lw=1.6, c="C0")
-    a2.set(title="fraction of resolved field energy below $f_c$",
-           xlabel="cutoff $f_c$ [Hz]", ylabel="% of energy")
+    a2.set(title="fraction of resolved field energy below $f_c$", xlabel="cutoff $f_c$ [Hz]", ylabel="% of energy")
     for a in (a1, a2):
         a.grid(alpha=0.3, which="both")
     fig.tight_layout()
@@ -469,7 +468,7 @@ def section_lag(S, B, f, mult_c, out, args):
         for k in range(n_mode):
             full = np.correlate(Bc[k], Sc[c], mode="full") / n_t
             mid = len(full) // 2
-            xc[c, k] = full[mid - L: mid + L + 1]
+            xc[c, k] = full[mid - L : mid + L + 1]
 
     # xc[c, k, i] peaks where B[t] matches S[t - lags[i]]; the sign convention
     # matches --force-lag, so the argmax is the value to pass straight through.
@@ -477,51 +476,45 @@ def section_lag(S, B, f, mult_c, out, args):
     lag_xc = int(lags[np.argmax(flat)])
     c_best, k_best, i_best = np.unravel_index(np.argmax(np.abs(xc)), xc.shape)
 
-    print(f"  cross-correlation, strongest pair : {ch_name(c_best, S.shape[0])} "
-          f"vs mode {k_best + 1}")
-    print(f"    peak |r|        : {abs(xc[c_best, k_best, i_best]):.3f} at lag "
-          f"{lags[i_best]:+d} ({1e3 * lags[i_best] / F_PIV_HZ:+.1f} ms)")
-    print(f"    argmax over all channels and modes: {lag_xc:+d} samples "
-          f"({1e3 * lag_xc / F_PIV_HZ:+.1f} ms)")
+    print(f"  cross-correlation, strongest pair : {ch_name(c_best, S.shape[0])} vs mode {k_best + 1}")
+    print(
+        f"    peak |r|        : {abs(xc[c_best, k_best, i_best]):.3f} at lag "
+        f"{lags[i_best]:+d} ({1e3 * lags[i_best] / F_PIV_HZ:+.1f} ms)"
+    )
+    print(f"    argmax over all channels and modes: {lag_xc:+d} samples ({1e3 * lag_xc / F_PIV_HZ:+.1f} ms)")
     print(f"    |r| at lag 0    : {abs(xc[:, :, L]).max():.3f}")
 
     # group delay, over the frequencies where the joint coherence is worth using
     hot = mult_c[0] > args.coh_floor
     tau = np.nan
     if hot.sum() >= 4:
-        kw = dict(fs=F_PIV_HZ, nperseg=min(args.nperseg, n_t),
-                  noverlap=min(args.nperseg, n_t) // 2)
+        kw = dict(fs=F_PIV_HZ, nperseg=min(args.nperseg, n_t), noverlap=min(args.nperseg, n_t) // 2)
         ph = np.unwrap(np.angle(signal.csd(Sc[c_best], Bc[k_best], **kw)[1]))
         A = np.vstack([f[hot], np.ones(hot.sum())]).T
         slope = np.linalg.lstsq(A, ph[hot], rcond=None)[0][0]
         tau = -slope / (2 * np.pi)
-        print(f"\n  cross-spectral group delay ({hot.sum()} bins with "
-              f"gamma2 > {args.coh_floor}):")
-        print(f"    tau             : {1e3 * tau:+.1f} ms "
-              f"({tau * F_PIV_HZ:+.1f} PIV samples)")
+        print(f"\n  cross-spectral group delay ({hot.sum()} bins with gamma2 > {args.coh_floor}):")
+        print(f"    tau             : {1e3 * tau:+.1f} ms ({tau * F_PIV_HZ:+.1f} PIV samples)")
     else:
-        print(f"\n  group delay: skipped, fewer than 4 bins above "
-              f"gamma2 = {args.coh_floor}")
+        print(f"\n  group delay: skipped, fewer than 4 bins above gamma2 = {args.coh_floor}")
 
-    print(f"\n  A convection time over one disc diameter is "
-          f"{1e3 * D_DISC / U_INF:.1f} ms; the PIV window is several diameters")
+    print(
+        f"\n  A convection time over one disc diameter is "
+        f"{1e3 * D_DISC / U_INF:.1f} ms; the PIV window is several diameters"
+    )
     print("  downstream, so a delay of a few ms is physics and a delay of tens")
     print("  of ms is an acquisition offset. Pass the result as --force-lag.")
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.6))
     for c in range(S.shape[0]):
-        a1.plot(1e3 * lags / F_PIV_HZ, xc[c, 0], lw=0.8, alpha=0.75,
-                label=ch_name(c, S.shape[0]))
+        a1.plot(1e3 * lags / F_PIV_HZ, xc[c, 0], lw=0.8, alpha=0.75, label=ch_name(c, S.shape[0]))
     a1.axvline(0, c="k", lw=1.0)
-    a1.axvline(1e3 * lag_xc / F_PIV_HZ, c="r", ls="--", lw=1.2,
-               label=f"argmax {lag_xc:+d}")
-    a1.set(title="cross-correlation with POD mode 1", xlabel="lag [ms]",
-           ylabel="r")
+    a1.axvline(1e3 * lag_xc / F_PIV_HZ, c="r", ls="--", lw=1.2, label=f"argmax {lag_xc:+d}")
+    a1.set(title="cross-correlation with POD mode 1", xlabel="lag [ms]", ylabel="r")
     a1.legend(fontsize=6, ncol=2)
     a2.plot(1e3 * lags / F_PIV_HZ, flat, lw=1.4, c="C3")
     a2.axvline(1e3 * lag_xc / F_PIV_HZ, c="r", ls="--", lw=1.2)
-    a2.set(title="max |r| over all channels and the leading 3 modes",
-           xlabel="lag [ms]", ylabel="max |r|")
+    a2.set(title="max |r| over all channels and the leading 3 modes", xlabel="lag [ms]", ylabel="max |r|")
     for a in (a1, a2):
         a.grid(alpha=0.3)
     fig.tight_layout()
@@ -549,18 +542,15 @@ def section_spatial(Psi, mult_c, Sbb, unflat, out):
     obs_map = (Psi[:, :n_mode] ** 2) @ expl
 
     frac = obs_map.sum() / tot_map.sum()
-    print(f"  fraction of the leading-{n_mode} energy the sensors explain: "
-          f"{frac:.3f}")
+    print(f"  fraction of the leading-{n_mode} energy the sensors explain: {frac:.3f}")
 
     G = unflat(np.stack([tot_map, obs_map, obs_map / np.where(tot_map > 0, tot_map, 1)], 1))
-    titles = ["field energy (modes 1..%d)" % n_mode,
-              "sensor-explainable energy", "ratio"]
+    titles = ["field energy (modes 1..%d)" % n_mode, "sensor-explainable energy", "ratio"]
     fig, axes = plt.subplots(2, 3, figsize=(15, 7))
     for j in range(3):
         for u in range(min(2, G.shape[0])):
             ax = axes[u, j]
-            im = ax.pcolormesh(G[u, j].T, cmap="viridis" if j < 2 else "magma",
-                               shading="auto")
+            im = ax.pcolormesh(G[u, j].T, cmap="viridis" if j < 2 else "magma", shading="auto")
             ax.set_title(f"{titles[j]}  ({'u' if u == 0 else 'v'})", fontsize=9)
             ax.set_aspect("equal")
             fig.colorbar(im, ax=ax, fraction=0.03)
@@ -580,37 +570,37 @@ def _save(fig, out, name):
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_data_args(p)
     # make_split reads these; spectra.py does not sweep them
     p.add_argument("--delays", type=int, nargs="+", default=[1])
     p.add_argument("--delay-stride", type=int, default=1)
 
     s = p.add_argument_group("spectra")
-    s.add_argument("--r-field", type=int, default=16,
-                   help="POD modes to analyse; the coherence of mode 40 is noise")
+    s.add_argument("--r-field", type=int, default=16, help="POD modes to analyse; the coherence of mode 40 is noise")
     s.add_argument("--n-modes-coh", type=int, default=8)
     s.add_argument("--show-modes", type=int, default=8)
-    s.add_argument("--nperseg", type=int, default=256,
-                   help="Welch segment at the PIV rate. Shorter means more "
-                        "segments and less coherence bias, at coarser "
-                        "resolution -- the trade that decides whether the "
-                        "multiple coherence is quotable at all")
-    s.add_argument("--nperseg-force", type=int, default=8192,
-                   help="Welch segment at 2500 Hz")
-    s.add_argument("--csd-ridge", type=float, default=1e-6,
-                   help="Tikhonov on the input cross-spectral matrix")
-    s.add_argument("--coh-floor", type=float, default=0.2,
-                   help="coherence above which a bin is used for the group delay")
-    s.add_argument("--pod-method", default="randomized",
-                   choices=["svd", "snapshot", "randomized", "auto"])
+    s.add_argument(
+        "--nperseg",
+        type=int,
+        default=256,
+        help="Welch segment at the PIV rate. Shorter means more "
+        "segments and less coherence bias, at coarser "
+        "resolution -- the trade that decides whether the "
+        "multiple coherence is quotable at all",
+    )
+    s.add_argument("--nperseg-force", type=int, default=8192, help="Welch segment at 2500 Hz")
+    s.add_argument("--csd-ridge", type=float, default=1e-6, help="Tikhonov on the input cross-spectral matrix")
+    s.add_argument(
+        "--coh-floor", type=float, default=0.2, help="coherence above which a bin is used for the group delay"
+    )
+    s.add_argument("--pod-method", default="randomized", choices=["svd", "snapshot", "randomized", "auto"])
     s.add_argument("--strouhal", type=float, default=0.17)
     s.add_argument("--max-lag", type=int, default=80, help="PIV samples")
-    s.add_argument("--observed", type=float, default=0.8281,
-                   help="best NMSE from the sweep, for the ceiling comparison")
-    s.add_argument("--skip", nargs="*", default=[],
-                   choices=["raw", "piv", "coh", "band", "lag", "spatial"])
+    s.add_argument(
+        "--observed", type=float, default=0.8281, help="best NMSE from the sweep, for the ceiling comparison"
+    )
+    s.add_argument("--skip", nargs="*", default=[], choices=["raw", "piv", "coh", "band", "lag", "spatial"])
     s.add_argument("--out", default="results/spectra")
     args = p.parse_args()
 
@@ -621,24 +611,21 @@ def main() -> int:
     Q, S, unflat, case0, run_id, cases = load_data(args)
     tr, te = make_split(args, Q.shape[1], run_id, cases)[:2]
 
-    Psi, Sigma, B, qm = pod(Q[:, tr], r=args.r_field, subtract_mean=True,
-                            method=args.pod_method)
+    Psi, Sigma, B, qm = pod(Q[:, tr], r=args.r_field, subtract_mean=True, method=args.pod_method)
     # Normalise by the TOTAL fluctuation energy, not by the truncated basis's.
     # `Sigma` holds only r_field singular values, so Sigma**2 / sum(Sigma**2)
     # sums to 1 over the modes computed and silently asserts the rest of the
     # field does not exist -- which turns an honest ceiling of ~0.67 into 0.38.
     Qc = Q[:, tr] - qm
     total_energy = float(np.einsum("ij,ij->", Qc, Qc))
-    energy = Sigma[:args.r_field] ** 2 / total_energy
-    print(f"  POD r={args.r_field} on the training split, "
-          f"{100 * energy.sum():.1f}% of the total fluctuation energy")
+    energy = Sigma[: args.r_field] ** 2 / total_energy
+    print(f"  POD r={args.r_field} on the training split, {100 * energy.sum():.1f}% of the total fluctuation energy")
 
     Str = S[:, tr]
     res = {}
 
     if "raw" not in args.skip:
-        F, fname = raw_force(args.run, os.environ.get("RDS_ROOT"),
-                             drift_correct=not args.no_drift)
+        F, fname = raw_force(args.run, os.environ.get("RDS_ROOT"), drift_correct=not args.no_drift)
         section_raw_spectrum(F, fname, out, args)
     if "piv" not in args.skip:
         section_piv_rate(Str, B, energy, out, args)
@@ -646,18 +633,15 @@ def main() -> int:
     f = mult_c = Sbb = None
     if "coh" not in args.skip:
         f, mult_c, Sbb, ord_c, per_mode = section_coherence(Str, B, out, args)
-        res.update(f=f, mult_coh=mult_c, mode_psd=Sbb, ord_coh=ord_c,
-                   per_mode=per_mode)
+        res.update(f=f, mult_coh=mult_c, mode_psd=Sbb, ord_coh=ord_c, per_mode=per_mode)
         if "band" not in args.skip:
-            nmse_band, covered = section_band_ceiling(f, mult_c, Sbb, energy,
-                                                      args.observed, out)
+            nmse_band, covered = section_band_ceiling(f, mult_c, Sbb, energy, args.observed, out)
             res.update(nmse_band=nmse_band, covered=covered)
         if "lag" not in args.skip:
             lag_xc, tau = section_lag(Str, B, f, mult_c, out, args)
             res.update(lag_xcorr=lag_xc, group_delay_s=tau)
         if "spatial" not in args.skip:
-            res["explained_fraction"] = section_spatial(Psi, mult_c, Sbb,
-                                                        unflat, out)
+            res["explained_fraction"] = section_spatial(Psi, mult_c, Sbb, unflat, out)
 
     np.savez_compressed(os.path.join(out, "spectra.npz"), energy=energy, **res)
     rule("done")

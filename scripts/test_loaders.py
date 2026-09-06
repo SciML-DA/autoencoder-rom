@@ -37,7 +37,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.wake_experiment import (  # noqa: E402
+from experiments.april_wake.case_reader import (  # noqa: E402
     F_PIV_HZ,
     find_force_files,
     load_meanfield,
@@ -46,8 +46,7 @@ from datasets.wake_experiment import (  # noqa: E402
     read_dat,
     sync_forces,
 )
-from tools.epod import PODLSE, nmse, pod, split_train_test  # noqa: E402
-
+from field_estimation.epod import PODLSE, nmse, pod, split_train_test  # noqa: E402
 
 # ── data ──────────────────────────────────────────────────────────────────────
 
@@ -63,7 +62,7 @@ def load_case(run: str, n_snapshots: int, method: str = "block"):
     """Return (Q, S, grid_shape, meanfield).
 
     Q is (N_x, N_t) with N_x = 2 * Nx * Ny -- u stacked on top of v, columns as
-    snapshots, which is what `tools.epod` expects throughout.
+    snapshots, which is what `field_estimation.epod` expects throughout.
     """
     print(f"loading {run} ({n_snapshots} snapshots) ...")
     X = load_run(run, max_snapshots=n_snapshots)  # (2, Nt, Nx, Ny)
@@ -78,16 +77,14 @@ def load_case(run: str, n_snapshots: int, method: str = "block"):
     n_bad = int(np.isnan(X).sum())
     Q = np.nan_to_num(X.reshape(2, n_t, n_x * n_y)).transpose(0, 2, 1)
     Q = np.concatenate([Q[0], Q[1]], axis=0)  # (2*Nx*Ny, Nt)
-    print(f"  field    Q {Q.shape}   ({n_bad} NaN zeroed, "
-          f"{100 * n_bad / X.size:.2f}%)")
+    print(f"  field    Q {Q.shape}   ({n_bad} NaN zeroed, {100 * n_bad / X.size:.2f}%)")
 
     recs = find_force_files()
     yaw = yaw_from_run(run)
     match = [r for r in recs if r.is_sync and r.yaw_key == yaw]
     if not match:
         raise FileNotFoundError(
-            f"no sync force file for yaw {yaw}; have "
-            f"{sorted({r.yaw_key for r in recs if r.is_sync})}"
+            f"no sync force file for yaw {yaw}; have {sorted({r.yaw_key for r in recs if r.is_sync})}"
         )
     F = read_dat(match[0].path)
     S = sync_forces(F, pairs, method=method)  # (12, Nt)
@@ -112,18 +109,15 @@ def plot_spectrum(Q, out):
     fig, ax = plt.subplots(1, 2, figsize=(11, 4))
     k = np.arange(1, min(len(Sigma), 200) + 1)
     ax[0].semilogy(k, energy[: len(k)], ".-", lw=1, ms=4)
-    ax[0].set(xlabel="mode $k$", ylabel="energy fraction $\\sigma_k^2/\\sum\\sigma^2$",
-              title="POD spectrum")
+    ax[0].set(xlabel="mode $k$", ylabel="energy fraction $\\sigma_k^2/\\sum\\sigma^2$", title="POD spectrum")
     ax[0].grid(alpha=0.3)
 
     ax[1].plot(k, cum[: len(k)], ".-", lw=1, ms=4)
     for frac in (0.9, 0.95, 0.99):
         r = int(np.searchsorted(cum, frac)) + 1
         ax[1].axhline(frac, ls=":", c="k", lw=0.8)
-        ax[1].annotate(f"{frac:.0%} at r={r}", (0.4, frac), xycoords=("axes fraction", "data"),
-                       fontsize=8, va="bottom")
-    ax[1].set(xlabel="mode $k$", ylabel="cumulative energy", title="cumulative",
-              ylim=(0, 1.02))
+        ax[1].annotate(f"{frac:.0%} at r={r}", (0.4, frac), xycoords=("axes fraction", "data"), fontsize=8, va="bottom")
+    ax[1].set(xlabel="mode $k$", ylabel="cumulative energy", title="cumulative", ylim=(0, 1.02))
     ax[1].grid(alpha=0.3)
     fig.tight_layout()
     fig.savefig(out, dpi=130)
@@ -141,10 +135,10 @@ def plot_modes(Q, grid, mf, out, n_modes=6):
     for k, ax in enumerate(axes.ravel()):
         mode = Psi[: n_x * n_y, k].reshape(n_x, n_y)
         lim = np.abs(mode).max()
-        ax.imshow(mode.T, origin="lower", cmap="RdBu_r", vmin=-lim, vmax=lim,
-                  extent=ext, aspect="equal")
+        ax.imshow(mode.T, origin="lower", cmap="RdBu_r", vmin=-lim, vmax=lim, extent=ext, aspect="equal")
         ax.set_title(f"mode {k + 1} ($u$)", fontsize=9)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
     fig.suptitle("leading POD spatial modes, streamwise component")
     fig.tight_layout()
     fig.savefig(out, dpi=130)
@@ -185,11 +179,19 @@ def animate(Q_true, Q_pred, grid, mf, out, n_frames=200, fps=20):
         (axes[1], "POD-LSE from 12 force channels", "Blues_r", vmin, vmax),
         (axes[2], "error", "RdBu_r", -elim, elim),
     ):
-        im = ax.imshow(np.zeros((n_y, n_x)), origin="lower", cmap=cmap,
-                       vmin=lo, vmax=hi, extent=ext, aspect="equal",
-                       interpolation="nearest")
+        im = ax.imshow(
+            np.zeros((n_y, n_x)),
+            origin="lower",
+            cmap=cmap,
+            vmin=lo,
+            vmax=hi,
+            extent=ext,
+            aspect="equal",
+            interpolation="nearest",
+        )
         ax.set_title(title, fontsize=10)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xticks([])
+        ax.set_yticks([])
         fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
         ims.append(im)
     txt = fig.suptitle("")
@@ -231,8 +233,7 @@ def main():
 
     print("\nPOD spectrum ...")
     _, cum = plot_spectrum(Q, os.path.join(args.out, "spectrum.png"))
-    print(f"  90% energy at r={int(np.searchsorted(cum, 0.90)) + 1}, "
-          f"99% at r={int(np.searchsorted(cum, 0.99)) + 1}")
+    print(f"  90% energy at r={int(np.searchsorted(cum, 0.90)) + 1}, 99% at r={int(np.searchsorted(cum, 0.99)) + 1}")
     plot_modes(Q, grid, mf, os.path.join(args.out, "modes.png"))
 
     # Contiguous split with a guard band. A random split leaks badly here: at
@@ -240,20 +241,14 @@ def main():
     # frame has near-copies of itself in the training set and the score is
     # meaningless.
     tr, te = split_train_test(Q.shape[1], test_fraction=0.25, gap=args.gap)
-    print(f"\nsplit: train {tr[0]}..{tr[-1]} ({len(tr)}), "
-          f"test {te[0]}..{te[-1]} ({len(te)}), gap {args.gap}")
+    print(f"\nsplit: train {tr[0]}..{tr[-1]} ({len(tr)}), test {te[0]}..{te[-1]} ({len(te)}), gap {args.gap}")
 
-    print(f"\nfitting POD-LSE (r_field={args.r_field}, r_sensor={args.r_sensor}, "
-          f"ridge={args.ridge:g}) ...")
-    model = PODLSE(
-        r_field=args.r_field, r_sensor=args.r_sensor, ridge=args.ridge
-    ).fit(Q[:, tr], S[:, tr])
+    print(f"\nfitting POD-LSE (r_field={args.r_field}, r_sensor={args.r_sensor}, ridge={args.ridge:g}) ...")
+    model = PODLSE(r_field=args.r_field, r_sensor=args.r_sensor, ridge=args.ridge).fit(Q[:, tr], S[:, tr])
 
     train_err = model.score(Q[:, tr], S[:, tr])
     test_err = model.score(Q[:, te], S[:, te])
-    baseline = nmse(
-        Q[:, te], np.repeat(Q[:, tr].mean(1, keepdims=True), len(te), axis=1)
-    )
+    baseline = nmse(Q[:, te], np.repeat(Q[:, tr].mean(1, keepdims=True), len(te), axis=1))
 
     print(f"\n  nmse train        : {train_err:.4f}")
     print(f"  nmse test         : {test_err:.4f}")
@@ -266,8 +261,7 @@ def main():
 
     print("\nanimating test block ...")
     Q_pred = model.predict(S[:, te])
-    animate(Q[:, te], Q_pred, grid, mf,
-            os.path.join(args.out, "reconstruction.gif"), n_frames=args.frames)
+    animate(Q[:, te], Q_pred, grid, mf, os.path.join(args.out, "reconstruction.gif"), n_frames=args.frames)
 
     print(f"\ndone -> {args.out}/\n")
     return 0

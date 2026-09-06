@@ -3,8 +3,8 @@
 verify_reconstruction.py
 ========================
 
-Verification suite for the sparse-sensor reconstruction stack: ``tools/epod.py``
-(POD, extended POD, POD-LSE), ``tools/branched_ae.py`` (the two-branch
+Verification suite for the sparse-sensor reconstruction stack: ``field_estimation/epod.py``
+(POD, extended POD, POD-LSE), ``field_estimation/branched_ae.py`` (the two-branch
 autoencoder and the latent forecaster), and the ``Case`` machinery in
 ``datasets/wake_experiment.py``.
 
@@ -54,15 +54,15 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets import wake_experiment as we  # noqa: E402
-from tools.branched_ae import (  # noqa: E402
+from experiments.april_wake import case_reader as we  # noqa: E402
+from field_estimation.branched_ae import (  # noqa: E402
     BranchedAE,
     LatentForecaster,
     LinearLatent,
     TorchLatent,
     sensor_windows,
 )
-from tools.epod import (  # noqa: E402
+from field_estimation.epod import (  # noqa: E402
     PODLSE,
     ExtendedPOD,
     blocked_folds,
@@ -137,11 +137,12 @@ def toy(
 
     Psi, _ = np.linalg.qr(rng.standard_normal((2 * n_f, rank)))
     freqs = 3.0 + 2.7 * np.arange(rank)  # distinct, all well under Nyquist
-    A = np.stack([
-        np.sin(2 * np.pi * f * t + p) * amp
-        for f, p, amp in zip(freqs, rng.uniform(0, 2 * np.pi, rank),
-                             np.linspace(1.0, 0.25, rank))
-    ])
+    A = np.stack(
+        [
+            np.sin(2 * np.pi * f * t + p) * amp
+            for f, p, amp in zip(freqs, rng.uniform(0, 2 * np.pi, rank), np.linspace(1.0, 0.25, rank))
+        ]
+    )
     q_mean = rng.standard_normal((2 * n_f, 1)) * 2.0 + 10.0
     Q = Psi @ A + q_mean  # (2*n_f, n_t), the repo's masked flat layout
 
@@ -155,8 +156,9 @@ def toy(
         p_sig = np.mean(S**2, axis=1, keepdims=True)
         S = S + rng.standard_normal(S.shape) * np.sqrt(p_sig / 10 ** (snr_db / 10))
 
-    return dict(Q=Q, S=S, A=A, M=M, Psi=Psi, q_mean=q_mean, fluid=fluid,
-                rank=rank, n_x=n_x, n_y=n_y, t=t, f_sample=f_sample)
+    return dict(
+        Q=Q, S=S, A=A, M=M, Psi=Psi, q_mean=q_mean, fluid=fluid, rank=rank, n_x=n_x, n_y=n_y, t=t, f_sample=f_sample
+    )
 
 
 def _grid(c, Q=None):
@@ -185,8 +187,7 @@ def pod_recovers_known_rank(v):
     n = int((Sigma > thresh).sum())
     if v:
         print(f"      sigma[:8] = {np.array2string(Sigma[:8], precision=3)}")
-    return _report("pod_recovers_known_rank", n == c["rank"],
-                   f"{n} modes above threshold, expected {c['rank']}")
+    return _report("pod_recovers_known_rank", n == c["rank"], f"{n} modes above threshold, expected {c['rank']}")
 
 
 @check
@@ -200,8 +201,7 @@ def pod_orthonormal_and_exact(v):
     recon = np.abs(Psi @ B - Q).max() / np.abs(Q).max()
     cycle = np.abs(Psi[:, :r].T @ (Psi[:, :r] @ B[:r]) - B[:r]).max() / np.abs(B).max()
     ok = orth < 1e-12 and recon < 1e-12 and cycle < 1e-12
-    return _report("pod_orthonormal_and_exact", ok,
-                   f"orth {orth:.1e}, recon {recon:.1e}, cycle {cycle:.1e}")
+    return _report("pod_orthonormal_and_exact", ok, f"orth {orth:.1e}, recon {recon:.1e}, cycle {cycle:.1e}")
 
 
 @check
@@ -250,8 +250,7 @@ def lse_map_solves_least_squares(v):
     d = np.abs(M - M_ref).max() / np.abs(M_ref).max()
     orth = np.abs((B - M @ C) @ C.T).max() / np.abs(B @ C.T).max()
     ok = d < 1e-8 and orth < 1e-8
-    return _report("lse_map_solves_least_squares", ok,
-                   f"vs lstsq {d:.1e}, residual orthogonality {orth:.1e}")
+    return _report("lse_map_solves_least_squares", ok, f"vs lstsq {d:.1e}, residual orthogonality {orth:.1e}")
 
 
 @check
@@ -350,8 +349,7 @@ def error_grows_with_sensor_noise(v):
         m = PODLSE(r_field=c["rank"], r_sensor=8, ridge=1e-4).fit(c["Q"][:, tr], c["S"][:, tr])
         errs.append(m.score(c["Q"][:, te], c["S"][:, te]))
     ok = all(b > a for a, b in zip(errs, errs[1:]))
-    return _report("error_grows_with_sensor_noise", ok,
-                   " < ".join(f"{e:.2e}" for e in errs))
+    return _report("error_grows_with_sensor_noise", ok, " < ".join(f"{e:.2e}" for e in errs))
 
 
 @check
@@ -369,8 +367,9 @@ def linear_floor_under_nonlinearity(v):
         m = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
         out[resp] = m.score(c["Q"][:, te], c["S"][:, te])
     ok = out["linear"] < 1e-10 < out["quadratic"]
-    return _report("linear_floor_under_nonlinearity", ok,
-                   f"linear {out['linear']:.1e}, quadratic {out['quadratic']:.1e}")
+    return _report(
+        "linear_floor_under_nonlinearity", ok, f"linear {out['linear']:.1e}, quadratic {out['quadratic']:.1e}"
+    )
 
 
 # ── 3. observability, floors and the rank ceiling ─────────────────────────────
@@ -388,8 +387,11 @@ def observability_is_one_for_linear_sensors(v):
     if v:
         print(f"      full={np.round(full, 4)}  partial={np.round(partial, 4)}")
     ok = np.abs(full - 1).max() < 1e-8 and partial.sum() < c["rank"] - 0.5
-    return _report("observability_is_one_for_linear_sensors", ok,
-                   f"full min {full.min():.6f}, partial sum {partial.sum():.2f}/{c['rank']}")
+    return _report(
+        "observability_is_one_for_linear_sensors",
+        ok,
+        f"full min {full.min():.6f}, partial sum {partial.sum():.2f}/{c['rank']}",
+    )
 
 
 @check
@@ -403,8 +405,7 @@ def projection_floor_bounds_every_estimator(v):
     m = PODLSE(r_field=r, r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     got = m.score(c["Q"][:, te], c["S"][:, te])
     ok = got >= floor * (1 - 1e-9)
-    return _report("projection_floor_bounds_every_estimator", ok,
-                   f"floor {floor:.4f} <= score {got:.4f}")
+    return _report("projection_floor_bounds_every_estimator", ok, f"floor {floor:.4f} <= score {got:.4f}")
 
 
 @check
@@ -440,8 +441,7 @@ def delay_embed_raises_rank(v):
     e1 = lag.score(c["Q"][:, te], Sd[:, te])
     if v:
         print(f"      instantaneous {e0:.3e} -> delayed {e1:.3e}")
-    return _report("delay_embed_raises_rank", e1 < e0 / 10,
-                   f"{e0:.2e} -> {e1:.2e} with 21 lags")
+    return _report("delay_embed_raises_rank", e1 < e0 / 10, f"{e0:.2e} -> {e1:.2e} with 21 lags")
 
 
 @check
@@ -465,8 +465,7 @@ def no_leakage(v):
     rand = mr.score(c["Q"][:, rte], c["S"][:, rte])
     if v:
         print(f"      contiguous {contig:.4e}  random {rand:.4e}")
-    return _report("no_leakage", contig > rand,
-                   f"contiguous {contig:.3e} > random {rand:.3e}")
+    return _report("no_leakage", contig > rand, f"contiguous {contig:.3e} > random {rand:.3e}")
 
 
 @check
@@ -479,8 +478,7 @@ def blocked_folds_respect_the_gap(v):
         ok &= len(np.intersect1d(tr, va)) == 0
         ok &= np.min(np.abs(tr[:, None] - va[None, :])) > 10 if len(tr) else True
     ok &= np.array_equal(np.sort(np.concatenate(seen)), idx)
-    return _report("blocked_folds_respect_the_gap", bool(ok),
-                   f"{len(seen)} folds, no overlap, gap honoured")
+    return _report("blocked_folds_respect_the_gap", bool(ok), f"{len(seen)} folds, no overlap, gap honoured")
 
 
 # ── 4. the two-branch autoencoder ─────────────────────────────────────────────
@@ -495,8 +493,7 @@ def sensor_windows_match_delay_embed(v):
     D = delay_embed(c["S"], L, h)
     back = W[:, ::-1, :].transpose(1, 2, 0).reshape(L * c["S"].shape[0], -1)
     ok = np.array_equal(back, D) and np.allclose(W[:, -1, :].T, c["S"])
-    return _report("sensor_windows_match_delay_embed", ok,
-                   f"{W.shape} windows, newest slice == S")
+    return _report("sensor_windows_match_delay_embed", ok, f"{W.shape} windows, newest slice == S")
 
 
 @check
@@ -513,8 +510,7 @@ def linear_latent_roundtrips(v):
     d = np.abs(lat.decode_torch(Zt).numpy().T - (lat.decode(Z) - qm)).max()
     d /= np.abs(c["Q"]).max()
     ok = rt < 1e-20 and d < 1e-5  # float32 on the torch side
-    return _report("linear_latent_roundtrips", ok,
-                   f"round-trip nmse {rt:.1e}, torch vs numpy {d:.1e}")
+    return _report("linear_latent_roundtrips", ok, f"round-trip nmse {rt:.1e}, torch vs numpy {d:.1e}")
 
 
 @check
@@ -532,9 +528,17 @@ def branched_linear_matches_podlse(v):
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e_closed = closed.score(c["Q"][:, te], c["S"][:, te])
 
-    m = BranchedAE(LinearLatent(Psi, qm, device="cpu"), branch="linear", n_delays=1,
-                   n_epochs=600, patience=120, learning_rate=5e-3, batch_size=256,
-                   device="cpu", seed=0).fit(c["Q"], c["S"], tr)
+    m = BranchedAE(
+        LinearLatent(Psi, qm, device="cpu"),
+        branch="linear",
+        n_delays=1,
+        n_epochs=600,
+        patience=120,
+        learning_rate=5e-3,
+        batch_size=256,
+        device="cpu",
+        seed=0,
+    ).fit(c["Q"], c["S"], tr)
 
     # On the training block the closed form is the exact minimiser, so no
     # gradient-descent run can beat it -- that is the sharp assertion, and it
@@ -551,8 +555,9 @@ def branched_linear_matches_podlse(v):
         print(f"      train: closed {tr_closed:.5f} learned {tr_learned:.5f}")
         print(f"      test : closed {e_closed:.5f} learned {e_learned:.5f}")
     ok = tr_closed <= tr_learned * (1 + 1e-6) and 0.5 < ratio < 2.0
-    return _report("branched_linear_matches_podlse", ok,
-                   f"train {tr_closed:.4f}<={tr_learned:.4f}, test ratio {ratio:.2f}")
+    return _report(
+        "branched_linear_matches_podlse", ok, f"train {tr_closed:.4f}<={tr_learned:.4f}, test ratio {ratio:.2f}"
+    )
 
 
 @check
@@ -569,13 +574,13 @@ def branch_beats_the_linear_floor(v):
     lat = LinearLatent(Psi, qm, device="cpu")
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e_lin = closed.score(c["Q"][:, te], c["S"][:, te])
-    m = BranchedAE(lat, branch="mlp", n_delays=1, hidden=(64, 64), n_epochs=400,
-                   patience=80, batch_size=128, device="cpu", seed=0).fit(c["Q"], c["S"], tr)
+    m = BranchedAE(
+        lat, branch="mlp", n_delays=1, hidden=(64, 64), n_epochs=400, patience=80, batch_size=128, device="cpu", seed=0
+    ).fit(c["Q"], c["S"], tr)
     e_nl = m.score(c["Q"], c["S"], te)
     if v:
         print(f"      linear floor {e_lin:.5f}  mlp {e_nl:.5f}")
-    return _report("branch_beats_the_linear_floor", e_nl < e_lin / 2,
-                   f"{e_lin:.4f} -> {e_nl:.4f}")
+    return _report("branch_beats_the_linear_floor", e_nl < e_lin / 2, f"{e_lin:.4f} -> {e_nl:.4f}")
 
 
 @check
@@ -598,8 +603,7 @@ def torch_latent_wraps_an_autoencoder(v):
 
     c = toy(n_t=400, n_x=16, n_y=12, rank=4)
     X = _grid(c)
-    ae = AE(n_latent=4, layer_dims=(64, 32), n_epochs=40, batch_size=32,
-            device="cpu", seed=0).fit(X)
+    ae = AE(n_latent=4, layer_dims=(64, 32), n_epochs=40, batch_size=32, device="cpu", seed=0).fit(X)
     lat = TorchLatent(ae, device="cpu")
     Z = lat.encode(X)
     a = lat.decode(Z)
@@ -611,8 +615,7 @@ def torch_latent_wraps_an_autoencoder(v):
     scale = np.asarray(ae._scale).ravel()
     d = np.abs(b.T * scale[:, None] + ae.Q_mean - a).max() / np.abs(a).max()
     ok = d < 1e-5 and F.shape == (c["Q"].shape[1], c["Q"].shape[0]) and Z.shape[0] == 4
-    return _report("torch_latent_wraps_an_autoencoder", ok,
-                   f"decode_torch vs decode {d:.1e}, latent {Z.shape}")
+    return _report("torch_latent_wraps_an_autoencoder", ok, f"decode_torch vs decode {d:.1e}, latent {Z.shape}")
 
 
 @check
@@ -626,8 +629,9 @@ def forecaster_beats_persistence(v):
     c = toy(n_t=3000, rank=4, seed=8)
     Psi, _, B, _ = pod(c["Q"], 4, subtract_mean=True)
     tr = np.arange(2200)
-    f = LatentForecaster(n_latent=4, n_delays=20, n_unroll=5, hidden=48,
-                         n_epochs=120, patience=25, device="cpu", seed=0).fit(B, tr)
+    f = LatentForecaster(
+        n_latent=4, n_delays=20, n_unroll=5, hidden=48, n_epochs=120, patience=25, device="cpu", seed=0
+    ).fit(B, tr)
     h = 40
     errs, pers = [], []
     for t0 in range(2400, 2900, 50):
@@ -638,8 +642,7 @@ def forecaster_beats_persistence(v):
     e, pe = float(np.mean(errs)), float(np.mean(pers))
     if v:
         print(f"      gru {e:.4f}  persistence {pe:.4f}")
-    return _report("forecaster_beats_persistence", e < pe,
-                   f"gru {e:.4f} < persistence {pe:.4f} at h={h}")
+    return _report("forecaster_beats_persistence", e < pe, f"gru {e:.4f} < persistence {pe:.4f} at h={h}")
 
 
 # ── 5. the data layer ─────────────────────────────────────────────────────────
@@ -659,14 +662,22 @@ def _write_fixture(root, n_t=240, n_x=24, n_y=16, seed=0):
     os.makedirs(snaps)
     for i in range(n_t):
         a = 201 + 2 * i
-        np.savez(os.path.join(snaps, f"PIV_PAIR_{a:06d}-{a + 1:06d}.npz"),
-                 u=G[0, i].T, v=(G[1, i] / we.V_SIGN).T)  # stored (Ny, Nx)
+        np.savez(
+            os.path.join(snaps, f"PIV_PAIR_{a:06d}-{a + 1:06d}.npz"), u=G[0, i].T, v=(G[1, i] / we.V_SIGN).T
+        )  # stored (Ny, Nx)
 
     X, Y = np.meshgrid(np.arange(n_x) * 2.0, np.arange(n_y) * 2.0)  # (Ny, Nx)
-    np.savez(os.path.join(root, we.MEANFIELD), X=X, Y=Y,
-             u_bar=np.nanmean(G[0], 0).T, v_bar=np.nanmean(G[1], 0).T,
-             Rxx=np.nanvar(G[0], 0).T, Rxy=np.zeros((n_y, n_x)),
-             Ryy=np.nanvar(G[1], 0).T, mask=c["fluid"].T)
+    np.savez(
+        os.path.join(root, we.MEANFIELD),
+        X=X,
+        Y=Y,
+        u_bar=np.nanmean(G[0], 0).T,
+        v_bar=np.nanmean(G[1], 0).T,
+        Rxx=np.nanvar(G[0], 0).T,
+        Rxy=np.zeros((n_y, n_x)),
+        Ryy=np.nanvar(G[1], 0).T,
+        mask=c["fluid"].T,
+    )
 
     # forces at 2500 Hz: PIV frame j lands on force sample 10j, and frame i has
     # pair 201+2i -> j = 100+i, so the record must reach 10*(100+n_t)
@@ -677,10 +688,12 @@ def _write_fixture(root, n_t=240, n_x=24, n_y=16, seed=0):
     for i in range(n_t):
         F[:, we.FORCE_PER_PIV * (100 + i) : we.FORCE_PER_PIV * (101 + i)] = c["S"][:, i : i + 1]
     F.astype("<f8").T.ravel(order="C").tofile(  # column-major on disk
-        os.path.join(fd, "10ms_0_0_sync(12-00-00).dat"))
+        os.path.join(fd, "10ms_0_0_sync(12-00-00).dat")
+    )
     for hh, off in ((11, 1.0), (13, 3.0)):  # two tunnel-off files -> linear drift
         np.full((we.N_FORCE_CHANNELS, 100), off).astype("<f8").T.ravel(order="C").tofile(
-            os.path.join(fd, f"baseline(0{hh}-00-00).dat" if hh < 10 else f"baseline({hh}-00-00).dat"))
+            os.path.join(fd, f"baseline(0{hh}-00-00).dat" if hh < 10 else f"baseline({hh}-00-00).dat")
+        )
     return run, c
 
 
@@ -689,15 +702,13 @@ def case_flat_roundtrips_with_holes(v):
     """flat -> unflat is lossless and puts the NaN holes back where they were."""
     c = toy(n_t=50)
     G = _grid(c)
-    case = we.Case(run="toy", X=G, S=c["S"], pairs=list(range(50)),
-                   fluid_mask=c["fluid"])
+    case = we.Case(run="toy", X=G, S=c["S"], pairs=list(range(50)), fluid_mask=c["fluid"])
     Q = case.flat()
     back = case.unflat(Q)
     same = np.array_equal(np.isnan(back), np.isnan(G))
     d = np.nanmax(np.abs(back - G))
     ok = Q.shape == c["Q"].shape and same and d < 1e-12
-    return _report("case_flat_roundtrips_with_holes", ok,
-                   f"{Q.shape}, holes preserved, max |diff| {d:.1e}")
+    return _report("case_flat_roundtrips_with_holes", ok, f"{Q.shape}, holes preserved, max |diff| {d:.1e}")
 
 
 @check
@@ -712,12 +723,12 @@ def build_case_reads_an_rds_shaped_run(v):
         # so any resampling method must return exactly S -- up to the drift
         d_s = np.abs(case.S - (c["S"] - 2.0)).max() / np.abs(c["S"]).max()
         d_q = np.abs(Q - c["Q"]).max() / np.abs(c["Q"]).max()
-        ok = (case.n_t == 120 and case.drift_applied
-              and d_s < 1e-10 and d_q < 1e-5)  # float32 snapshots on disk
+        ok = case.n_t == 120 and case.drift_applied and d_s < 1e-10 and d_q < 1e-5  # float32 snapshots on disk
         if v:
             print(f"      Q {Q.shape} d_q={d_q:.1e}  S {case.S.shape} d_s={d_s:.1e}")
-        return _report("build_case_reads_an_rds_shaped_run", ok,
-                       f"field {d_q:.1e}, sensors {d_s:.1e}, drift {case.drift_applied}")
+        return _report(
+            "build_case_reads_an_rds_shaped_run", ok, f"field {d_q:.1e}, sensors {d_s:.1e}, drift {case.drift_applied}"
+        )
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -738,8 +749,7 @@ def force_sync_picks_the_right_samples(v):
     ok = np.array_equal(got, want)
     blk = we.sync_forces(F, pairs, method="block")[0]
     ok &= np.allclose(blk, want + (we.FORCE_PER_PIV - 1) / 2)
-    return _report("force_sync_picks_the_right_samples", bool(ok),
-                   "decimate and block agree with the derived offset")
+    return _report("force_sync_picks_the_right_samples", bool(ok), "decimate and block agree with the derived offset")
 
 
 @check
@@ -752,15 +762,15 @@ def drift_correction_removes_the_ramp(v):
         secs = [3600, 7200, 10800]
         for s, off in zip(secs, [1.0, 2.0, 3.0]):  # exactly linear in wall time
             h = s // 3600
-            np.full((we.N_FORCE_CHANNELS, 50), off).astype("<f8").T.ravel(
-                order="C").tofile(os.path.join(fd, f"baseline_0_0(0{h}-00-00).dat"))
+            np.full((we.N_FORCE_CHANNELS, 50), off).astype("<f8").T.ravel(order="C").tofile(
+                os.path.join(fd, f"baseline_0_0(0{h}-00-00).dat")
+            )
         recs = we.find_force_files(root)
         fits = we.baseline_drift_fit(recs, degree=1)
         data = np.full((we.N_FORCE_CHANNELS, 10), 5.0)
         out = we.apply_drift_correction(data, 7200, fits[(0, 0)])
         d = np.abs(out - 3.0).max()  # 5.0 measured minus the fitted 2.0 zero
-        return _report("drift_correction_removes_the_ramp", d < 1e-9,
-                       f"residual {d:.1e} after removing a known ramp")
+        return _report("drift_correction_removes_the_ramp", d < 1e-9, f"residual {d:.1e} after removing a known ramp")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -780,10 +790,25 @@ def study_script_runs_end_to_end(v):
     try:
         run, _ = _write_fixture(root, n_t=400)
         env = {**os.environ, "RDS_ROOT": root, "MPLBACKEND": "Agg"}
-        cmd = [sys.executable,
-               os.path.join(os.path.dirname(__file__), "sparse_sensor_study.py"),
-               "--quick", "--run", run, "--n", "400", "--r-field", "6",
-               "--out", out, "--tag", "verify", "--frames", "10", "--device", "cpu"]
+        cmd = [
+            sys.executable,
+            os.path.join(os.path.dirname(__file__), "sparse_sensor_study.py"),
+            "--quick",
+            "--run",
+            run,
+            "--n",
+            "400",
+            "--r-field",
+            "6",
+            "--out",
+            out,
+            "--tag",
+            "verify",
+            "--frames",
+            "10",
+            "--device",
+            "cpu",
+        ]
         p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1200)
         csvp = os.path.join(out, "verify", "results.csv")
         ok = p.returncode == 0 and os.path.exists(csvp)
@@ -791,8 +816,7 @@ def study_script_runs_end_to_end(v):
             print(p.stdout[-3000:])
             print(p.stderr[-3000:])
         n_rows = sum(1 for _ in open(csvp)) - 1 if os.path.exists(csvp) else 0
-        return _report("study_script_runs_end_to_end", ok,
-                       f"rc={p.returncode}, {n_rows} rows in results.csv")
+        return _report("study_script_runs_end_to_end", ok, f"rc={p.returncode}, {n_rows} rows in results.csv")
     finally:
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(out, ignore_errors=True)
@@ -815,13 +839,36 @@ def sweep_script_runs_and_resumes(v):
     try:
         run, _ = _write_fixture(root, n_t=400)
         env = {**os.environ, "RDS_ROOT": root, "MPLBACKEND": "Agg"}
-        cmd = [sys.executable,
-               os.path.join(os.path.dirname(__file__), "sparse_sensor_sweep.py"),
-               "--quick", "--run", run, "--n", "400", "--stages", "A", "B",
-               "--latents-sweep", "4", "8", "--delays-sweep", "1", "5",
-               "--latents", "pod", "--branches", "mlp",
-               "--out", out, "--tag", "verify", "--device", "cpu",
-               "--video-frames", "8"]
+        cmd = [
+            sys.executable,
+            os.path.join(os.path.dirname(__file__), "sparse_sensor_sweep.py"),
+            "--quick",
+            "--run",
+            run,
+            "--n",
+            "400",
+            "--stages",
+            "A",
+            "B",
+            "--latents-sweep",
+            "4",
+            "8",
+            "--delays-sweep",
+            "1",
+            "5",
+            "--latents",
+            "pod",
+            "--branches",
+            "mlp",
+            "--out",
+            out,
+            "--tag",
+            "verify",
+            "--device",
+            "cpu",
+            "--video-frames",
+            "8",
+        ]
         p1 = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1800)
         csvp = os.path.join(out, "verify", "results.csv")
         n1 = sum(1 for _ in open(csvp)) - 1 if os.path.exists(csvp) else -1
@@ -830,13 +877,11 @@ def sweep_script_runs_and_resumes(v):
         n2 = sum(1 for _ in open(csvp)) - 1 if os.path.exists(csvp) else -1
         pack = os.path.exists(os.path.join(out, "verify", "video_pack.npz"))
 
-        ok = (p1.returncode == 0 and p2.returncode == 0 and n1 > 0 and n1 == n2
-              and pack and "0 to run" in p2.stdout)
+        ok = p1.returncode == 0 and p2.returncode == 0 and n1 > 0 and n1 == n2 and pack and "0 to run" in p2.stdout
         if v or not ok:
             print(p1.stdout[-2000:], p1.stderr[-2000:])
             print(p2.stdout[-2000:], p2.stderr[-2000:])
-        return _report("sweep_script_runs_and_resumes", ok,
-                       f"{n1} rows, {n2} after resume, video pack {pack}")
+        return _report("sweep_script_runs_and_resumes", ok, f"{n1} rows, {n2} after resume, video pack {pack}")
     finally:
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(out, ignore_errors=True)
@@ -857,28 +902,36 @@ def video_pack_renders(v):
         c = toy(n_t=12, n_x=16, n_y=12, rank=4)
         G = _grid(c).astype(np.float32)
         np.savez_compressed(
-            os.path.join(d, "video_pack.npz"), truth=G, pred_0=G * 0.9,
-            x=np.arange(16, dtype=float), y=np.arange(12, dtype=float),
-            meta=json.dumps({"dt": 0.004, "run": "toy",
-                             "labels": {"pred_0": {"label": "toy", "nmse": 0.01,
-                                                   "pinned": True}}}))
+            os.path.join(d, "video_pack.npz"),
+            truth=G,
+            pred_0=G * 0.9,
+            x=np.arange(16, dtype=float),
+            y=np.arange(12, dtype=float),
+            meta=json.dumps(
+                {"dt": 0.004, "run": "toy", "labels": {"pred_0": {"label": "toy", "nmse": 0.01, "pinned": True}}}
+            ),
+        )
         script = os.path.join(os.path.dirname(__file__), "make_reconstruction_video.py")
         env = {**os.environ, "MPLBACKEND": "Agg"}
         made = []
-        for extra in (["--format", "gif"],
-                      ["--format", "gif", "--view", "total"],
-                      ["--format", "gif", "--side-by-side"]):
+        for extra in (
+            ["--format", "gif"],
+            ["--format", "gif", "--view", "total"],
+            ["--format", "gif", "--side-by-side"],
+        ):
             r = subprocess.run(
-                [sys.executable, script, os.path.join(d, "video_pack.npz"),
-                 "--out", d, "--fps", "5"] + extra,
-                env=env, capture_output=True, text=True, timeout=600)
+                [sys.executable, script, os.path.join(d, "video_pack.npz"), "--out", d, "--fps", "5"] + extra,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
             if r.returncode != 0:
                 if v:
                     print(r.stdout, r.stderr)
                 return _report("video_pack_renders", False, f"rc={r.returncode} on {extra}")
             made += [f for f in os.listdir(d) if f.endswith(".gif")]
-        return _report("video_pack_renders", len(set(made)) >= 3,
-                       f"{len(set(made))} animations from one pack")
+        return _report("video_pack_renders", len(set(made)) >= 3, f"{len(set(made))} animations from one pack")
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

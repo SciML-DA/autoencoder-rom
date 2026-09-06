@@ -75,16 +75,15 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.sparse_sensors import (  # noqa: E402
+from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,
     band_limit,
     load_data,
     make_split,
 )
-from datasets.wake_experiment import F_PIV_HZ, RUNS  # noqa: E402
-from plotting import reconstruction as rp  # noqa: E402
-from tools.branched_ae import TorchLatent, default_device  # noqa: E402
-from tools.epod import (  # noqa: E402
+from experiments.april_wake.case_reader import F_PIV_HZ, RUNS  # noqa: E402
+from field_estimation.branched_ae import TorchLatent, default_device  # noqa: E402
+from field_estimation.epod import (  # noqa: E402
     cosine,
     delay_embed,
     energy_ratio,
@@ -93,11 +92,27 @@ from tools.epod import (  # noqa: E402
     pod,
     projection_floor,
 )
+from field_estimation import plots as rp  # noqa: E402
 
 CSV_FIELDS = [
-    "stage", "model", "latent", "branch", "r_field", "r_sensor", "r_sensor_used",
-    "ridge", "n_delays", "channels", "seed", "n_params", "nmse_train", "nmse_test",
-    "nmse_latent", "cos_test", "energy_test", "floor_test",
+    "stage",
+    "model",
+    "latent",
+    "branch",
+    "r_field",
+    "r_sensor",
+    "r_sensor_used",
+    "ridge",
+    "n_delays",
+    "channels",
+    "seed",
+    "n_params",
+    "nmse_train",
+    "nmse_test",
+    "nmse_latent",
+    "cos_test",
+    "energy_test",
+    "floor_test",
     # Training diagnostics. Without these a flat architecture comparison is
     # uninterpretable: a model that stopped at the epoch cap and one that
     # early-stopped on a plateau look identical in the score column and mean
@@ -105,15 +120,26 @@ CSV_FIELDS = [
     # a branched model is (1 - val_fraction) of the training block and so is
     # *smaller* than the closed-form estimators' -- a difference that reads as
     # a modelling gap if it is not recorded.
-    "sensor_noise", "weight_decay", "lr", "ensemble",
+    "sensor_noise",
+    "weight_decay",
+    "lr",
+    "ensemble",
     # With --band-hz, `nmse_test` scores against the BANDED target the model was
     # fitted to and `nmse_fullband` scores the same prediction against the
     # unfiltered field. Reporting only the first would let band-limiting flatter
     # itself: shrinking the target shrinks the error without the reconstruction
     # improving. The pair is the honest statement.
     "nmse_fullband",
-    "epochs_run", "train_loss", "val_loss", "stopped_early", "n_fit",
-    "fit_seconds", "n_train", "n_test", "run", "tag",
+    "epochs_run",
+    "train_loss",
+    "val_loss",
+    "stopped_early",
+    "n_fit",
+    "fit_seconds",
+    "n_train",
+    "n_test",
+    "run",
+    "tag",
 ]
 
 # The row's identity: the configuration as *requested*, so a planned config and
@@ -124,9 +150,22 @@ CSV_FIELDS = [
 # the value actually used after clamping to the delay-embedded width is recorded
 # separately as `r_sensor_used`. Keying on the resolved value instead looks
 # equivalent and silently breaks resumption, because None != 120.
-KEY = ("stage", "model", "latent", "branch", "r_field", "r_sensor", "ridge",
-       "n_delays", "channels", "seed", "sensor_noise", "weight_decay", "lr",
-       "ensemble")
+KEY = (
+    "stage",
+    "model",
+    "latent",
+    "branch",
+    "r_field",
+    "r_sensor",
+    "ridge",
+    "n_delays",
+    "channels",
+    "seed",
+    "sensor_noise",
+    "weight_decay",
+    "lr",
+    "ensemble",
+)
 
 
 def rule(t):
@@ -157,8 +196,7 @@ def _apply_unless_given(args, **defaults):
     giving every flag a ``None`` default and resolving each one by hand -- spreads
     the same logic over thirty arguments.
     """
-    typed = {a.split("=")[0].lstrip("-").replace("-", "_")
-             for a in sys.argv[1:] if a.startswith("--")}
+    typed = {a.split("=")[0].lstrip("-").replace("-", "_") for a in sys.argv[1:] if a.startswith("--")}
     for k, v in defaults.items():
         if k not in typed:
             setattr(args, k, v)
@@ -176,15 +214,29 @@ def _ae_hash(kind, r, seed, args, n_train) -> str:
     covers hyperparameters and you clear ``--cache-dir`` by hand when you touch
     the model. Same trade-off ``config/esn_config.py`` makes for the ESN.
     """
-    blob = json.dumps({
-        "kind": kind, "r": r, "seed": seed, "n_train": int(n_train),
-        "epochs": args.ae_epochs, "batch": args.ae_batch, "lr": args.ae_lr,
-        "patience": args.ae_patience, "run": "|".join(args.runs or [args.run]),
-        "n": args.n, "stride": args.stride, "test_fraction": args.test_fraction,
-        "force_smooth": args.force_smooth, "probes": args.probes,
-        "notch": args.notch, "notch_q": args.notch_q,
-        "hidden_scale": list(args.ae_hidden_scale), "cae_channels": list(args.cae_channels),
-    }, sort_keys=True)
+    blob = json.dumps(
+        {
+            "kind": kind,
+            "r": r,
+            "seed": seed,
+            "n_train": int(n_train),
+            "epochs": args.ae_epochs,
+            "batch": args.ae_batch,
+            "lr": args.ae_lr,
+            "patience": args.ae_patience,
+            "run": "|".join(args.runs or [args.run]),
+            "n": args.n,
+            "stride": args.stride,
+            "test_fraction": args.test_fraction,
+            "force_smooth": args.force_smooth,
+            "probes": args.probes,
+            "notch": args.notch,
+            "notch_q": args.notch_q,
+            "hidden_scale": list(args.ae_hidden_scale),
+            "cae_channels": list(args.cae_channels),
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -194,21 +246,24 @@ def _save_projector(p, path):
 
     conv = hasattr(p, "dec_conv")
     nets = ["enc_conv", "enc_fc", "dec_fc", "dec_conv"] if conv else ["encoder", "decoder"]
-    torch.save({
-        "cls": type(p).__name__,
-        "conv": conv,
-        "N_latent": p.N_latent,
-        "layer_dims": getattr(p, "layer_dims", None),
-        "channels": getattr(p, "channels", None),
-        "grid_shape": p.grid_shape,
-        "fluid_mask_flat": p.fluid_mask_flat,
-        "Q_mean": p.Q_mean,
-        "scale": p._scale,
-        "loss_history": p.loss_history,
-        "val_loss_history": getattr(p, "val_loss_history", []),
-        "n_epochs_run": getattr(p, "n_epochs_run", None),
-        "state": {n: getattr(p, n).state_dict() for n in nets},
-    }, path)
+    torch.save(
+        {
+            "cls": type(p).__name__,
+            "conv": conv,
+            "N_latent": p.N_latent,
+            "layer_dims": getattr(p, "layer_dims", None),
+            "channels": getattr(p, "channels", None),
+            "grid_shape": p.grid_shape,
+            "fluid_mask_flat": p.fluid_mask_flat,
+            "Q_mean": p.Q_mean,
+            "scale": p._scale,
+            "loss_history": p.loss_history,
+            "val_loss_history": getattr(p, "val_loss_history", []),
+            "n_epochs_run": getattr(p, "n_epochs_run", None),
+            "state": {n: getattr(p, n).state_dict() for n in nets},
+        },
+        path,
+    )
 
 
 def _load_projector(path, device):
@@ -268,10 +323,10 @@ class Latents:
         if self._pod is None:
             t0 = time.time()
             r_max = max(self.args.latents_sweep + [self.args.r_field])
-            Psi, Sigma, _, qm = pod(self.Q[:, self.tr], r=r_max, subtract_mean=True,
-                                    method=self.args.pod_method, seed=self.args.seed)
-            print(f"  POD basis r={r_max} (nested, sliced for smaller): "
-                  f"{time.time() - t0:.1f}s", flush=True)
+            Psi, Sigma, _, qm = pod(
+                self.Q[:, self.tr], r=r_max, subtract_mean=True, method=self.args.pod_method, seed=self.args.seed
+            )
+            print(f"  POD basis r={r_max} (nested, sliced for smaller): {time.time() - t0:.1f}s", flush=True)
             self._pod = (Psi, Sigma, qm)
         Psi, Sigma, qm = self._pod
         return Psi[:, :r], Sigma, qm
@@ -284,8 +339,7 @@ class Latents:
         if kind == "pod":
             Psi, _, qm = self.pod_basis(r)
             Latent = backend_classes(self.args.backend)[3]
-            lat = (Latent(Psi, qm) if self.args.backend == "jax"
-                   else Latent(Psi, qm, device=self.dev))
+            lat = Latent(Psi, qm) if self.args.backend == "jax" else Latent(Psi, qm, device=self.dev)
         else:
             lat = TorchLatent(self._autoencoder(kind, r, seed), device=self.dev)
         self._cache[ck] = lat
@@ -293,8 +347,7 @@ class Latents:
 
     def _autoencoder(self, kind, r, seed):
         a = self.args
-        path = os.path.join(a.cache_dir,
-                            f"{kind}_r{r}_s{seed}_{_ae_hash(kind, r, seed, a, len(self.tr))}.pt")
+        path = os.path.join(a.cache_dir, f"{kind}_r{r}_s{seed}_{_ae_hash(kind, r, seed, a, len(self.tr))}.pt")
         if os.path.exists(path) and not a.no_cache:
             print(f"  {kind.upper()} r={r} seed={seed}: cached", flush=True)
             return _load_projector(path, self.dev)
@@ -314,12 +367,22 @@ class Latents:
             cls, kw = AE, {"layer_dims": dims}
         else:
             cls, kw = CAE, {"channels": tuple(a.cae_channels)}
-        p = cls(n_latent=r, n_epochs=a.ae_epochs, batch_size=a.ae_batch,
-                learning_rate=a.ae_lr, patience=a.ae_patience,
-                device=self.dev, seed=seed, **kw).fit(grid)
-        print(f"  {kind.upper()} r={r} seed={seed}: {time.time() - t0:.1f}s, "
-              f"{p.n_params / 1e6:.1f}M params, "
-              f"{getattr(p, 'n_epochs_run', a.ae_epochs)} epochs", flush=True)
+        p = cls(
+            n_latent=r,
+            n_epochs=a.ae_epochs,
+            batch_size=a.ae_batch,
+            learning_rate=a.ae_lr,
+            patience=a.ae_patience,
+            device=self.dev,
+            seed=seed,
+            **kw,
+        ).fit(grid)
+        print(
+            f"  {kind.upper()} r={r} seed={seed}: {time.time() - t0:.1f}s, "
+            f"{p.n_params / 1e6:.1f}M params, "
+            f"{getattr(p, 'n_epochs_run', a.ae_epochs)} epochs",
+            flush=True,
+        )
         _save_projector(p, path)
         return p
 
@@ -335,25 +398,28 @@ BACKENDS = {
 
 def backend_classes(backend: str):
     """Returns (PODLSE, ExtendedPOD, BranchedAE, LinearLatent) for a backend."""
-    import tools
+    import field_estimation
 
-    return tuple(getattr(tools, n) for n in BACKENDS[backend])
+    return tuple(getattr(field_estimation, n) for n in BACKENDS[backend])
 
 
 def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
     """Fit and score one configuration. Returns a CSV row."""
     Lin, Ext, Branch, _ = backend_classes(args.backend)
     ch = _channels(S, cfg["channels"])
-    Sd = delay_embed(S[ch], cfg["n_delays"], args.delay_stride,
-                     args.delay_ahead)
+    Sd = delay_embed(S[ch], cfg["n_delays"], args.delay_stride, args.delay_ahead)
     t0 = time.time()
 
     if cfg["model"] in ("podlse", "epod"):
         r_s = min(cfg["r_sensor"] or Sd.shape[0], Sd.shape[0])
         if cfg["model"] == "podlse":
-            m = Lin(r_field=cfg["r_field"], r_sensor=r_s, ridge=cfg["ridge"],
-                    sensor_basis=args.sensor_basis,
-                    pod_method=args.pod_method).fit(Q[:, tr], Sd[:, tr])
+            m = Lin(
+                r_field=cfg["r_field"],
+                r_sensor=r_s,
+                ridge=cfg["ridge"],
+                sensor_basis=args.sensor_basis,
+                pod_method=args.pod_method,
+            ).fit(Q[:, tr], Sd[:, tr])
             lat_err = nmse(m.project(Q[:, te]), m.encode(Sd[:, te]))
             floor = m.floor(Q[:, te])
         else:
@@ -367,16 +433,25 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
         r_s_out = r_s
     else:
         lat = latents.get(cfg["latent"], cfg["r_field"], cfg["seed"])
-        kw = dict(branch=cfg["branch"], n_delays=cfg["n_delays"],
-                  delay_stride=args.delay_stride, hidden=tuple(args.hidden),
-                  gru_hidden=args.gru_hidden, cnn_channels=tuple(args.cnn_channels),
-                  lambda_field=args.lambda_field, latent_weight=args.latent_weight,
-                  sensor_noise=cfg["sensor_noise"],
-                  weight_decay=cfg["weight_decay"],
-                  lr_factor=args.lr_factor, lr_patience=args.lr_patience,
-                  n_epochs=args.epochs, batch_size=args.batch,
-                  learning_rate=cfg["lr"], patience=args.patience,
-                  seed=cfg["seed"])
+        kw = dict(
+            branch=cfg["branch"],
+            n_delays=cfg["n_delays"],
+            delay_stride=args.delay_stride,
+            hidden=tuple(args.hidden),
+            gru_hidden=args.gru_hidden,
+            cnn_channels=tuple(args.cnn_channels),
+            lambda_field=args.lambda_field,
+            latent_weight=args.latent_weight,
+            sensor_noise=cfg["sensor_noise"],
+            weight_decay=cfg["weight_decay"],
+            lr_factor=args.lr_factor,
+            lr_patience=args.lr_patience,
+            n_epochs=args.epochs,
+            batch_size=args.batch,
+            learning_rate=cfg["lr"],
+            patience=args.patience,
+            seed=cfg["seed"],
+        )
         if args.backend == "torch":
             kw["device"] = args.device  # jax picks its device from XLA
         n_ens = int(cfg.get("ensemble", 1) or 1)
@@ -423,28 +498,42 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
         n_fit = int(round(len(tr) * (1.0 - float(getattr(m, "val_fraction", 0.0)))))
 
     test_err = nmse(Q[:, te], pred)
-    full_err = (nmse(Q_full[:, te], pred) if Q_full is not None
-                else float("nan"))
+    full_err = nmse(Q_full[:, te], pred) if Q_full is not None else float("nan")
     # cosine and the energy ratio alongside NMSE: together they say *why* an
     # NMSE is what it is. The reference notebook reports cosine only, so this is
     # also what makes these numbers comparable with it.
-    cos_te = cosine(Q[:, te] - Q[:, te].mean(1, keepdims=True),
-                    pred - pred.mean(1, keepdims=True))
-    en_te = energy_ratio(Q[:, te] - Q[:, te].mean(1, keepdims=True),
-                         pred - pred.mean(1, keepdims=True))
-    row = dict(cfg, r_sensor_used=r_s_out, n_params=n_par, nmse_train=train_err,
-               nmse_test=test_err, nmse_latent=lat_err, cos_test=cos_te,
-               energy_test=en_te, nmse_fullband=full_err, floor_test=floor,
-               epochs_run=n_ep, train_loss=(hist[-1] if hist else float("nan")),
-               val_loss=(vhist[-1] if vhist else float("nan")),
-               stopped_early=int(stopped), n_fit=n_fit,
-               fit_seconds=time.time() - t0, n_train=len(tr), n_test=len(te),
-               run="|".join(args.runs or [args.run]), tag=args.tag)
+    cos_te = cosine(Q[:, te] - Q[:, te].mean(1, keepdims=True), pred - pred.mean(1, keepdims=True))
+    en_te = energy_ratio(Q[:, te] - Q[:, te].mean(1, keepdims=True), pred - pred.mean(1, keepdims=True))
+    row = dict(
+        cfg,
+        r_sensor_used=r_s_out,
+        n_params=n_par,
+        nmse_train=train_err,
+        nmse_test=test_err,
+        nmse_latent=lat_err,
+        cos_test=cos_te,
+        energy_test=en_te,
+        nmse_fullband=full_err,
+        floor_test=floor,
+        epochs_run=n_ep,
+        train_loss=(hist[-1] if hist else float("nan")),
+        val_loss=(vhist[-1] if vhist else float("nan")),
+        stopped_early=int(stopped),
+        n_fit=n_fit,
+        fit_seconds=time.time() - t0,
+        n_train=len(tr),
+        n_test=len(te),
+        run="|".join(args.runs or [args.run]),
+        tag=args.tag,
+    )
     videos.offer(label_of(cfg), test_err, pred[:, : args.video_frames])
     ep = f"  {n_ep}ep{'*' if stopped else ''}" if n_ep else ""
-    print(f"    {label_of(cfg):38s} test {test_err:.4f}  train {train_err:.4f}  "
-          f"cos {cos_te:.3f}  E {en_te:.2f}  floor {floor:.4f}  "
-          f"{n_par:>8,d} par  {row['fit_seconds']:.0f}s{ep}", flush=True)
+    print(
+        f"    {label_of(cfg):38s} test {test_err:.4f}  train {train_err:.4f}  "
+        f"cos {cos_te:.3f}  E {en_te:.2f}  floor {floor:.4f}  "
+        f"{n_par:>8,d} par  {row['fit_seconds']:.0f}s{ep}",
+        flush=True,
+    )
     return row
 
 
@@ -503,7 +592,7 @@ class VideoPack:
     def __init__(self, k, pins):
         self.k, self.pins = k, list(pins)
         self._pinned = {}  # pattern -> (err, label, pred)
-        self._top = {}     # label   -> (err, pred)
+        self._top = {}  # label   -> (err, pred)
 
     def offer(self, label, err, pred):
         if not np.isfinite(err):
@@ -538,11 +627,22 @@ class VideoPack:
 
 
 def base_cfg(args, **kw):
-    cfg = dict(stage="", model="branched", latent="pod", branch="mlp",
-               r_field=args.r_field, r_sensor=args.r_sensor, ridge=args.ridge,
-               n_delays=args.n_delays, channels="all", seed=args.seed,
-               sensor_noise=args.sensor_noise, weight_decay=args.weight_decay,
-               lr=args.lr, ensemble=args.ensemble)
+    cfg = dict(
+        stage="",
+        model="branched",
+        latent="pod",
+        branch="mlp",
+        r_field=args.r_field,
+        r_sensor=args.r_sensor,
+        ridge=args.ridge,
+        n_delays=args.n_delays,
+        channels="all",
+        seed=args.seed,
+        sensor_noise=args.sensor_noise,
+        weight_decay=args.weight_decay,
+        lr=args.lr,
+        ensemble=args.ensemble,
+    )
     cfg.update(kw)
     return cfg
 
@@ -552,12 +652,10 @@ def stage_A(args):
     out = []
     for r in args.latents_sweep:
         for model in ("podlse", "epod"):
-            out.append(base_cfg(args, stage="A", model=model, latent="pod",
-                                branch="closed-form", r_field=r))
+            out.append(base_cfg(args, stage="A", model=model, latent="pod", branch="closed-form", r_field=r))
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="A", model="branched",
-                                    latent=lk, branch=br, r_field=r))
+                out.append(base_cfg(args, stage="A", model="branched", latent=lk, branch=br, r_field=r))
     return out
 
 
@@ -565,12 +663,10 @@ def stage_B(args):
     """Window-length convergence at fixed latent size."""
     out = []
     for L in args.delays_sweep:
-        out.append(base_cfg(args, stage="B", model="podlse", latent="pod",
-                            branch="closed-form", n_delays=L))
+        out.append(base_cfg(args, stage="B", model="podlse", latent="pod", branch="closed-form", n_delays=L))
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="B", model="branched",
-                                    latent=lk, branch=br, n_delays=L))
+                out.append(base_cfg(args, stage="B", model="branched", latent=lk, branch=br, n_delays=L))
     return out
 
 
@@ -578,12 +674,10 @@ def stage_C(args):
     """Sensor ablation. Drop the disc-3 balance first -- it is the informative one."""
     out = []
     for ch in args.channel_sets:
-        out.append(base_cfg(args, stage="C", model="podlse", latent="pod",
-                            branch="closed-form", channels=ch))
+        out.append(base_cfg(args, stage="C", model="podlse", latent="pod", branch="closed-form", channels=ch))
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="C", model="branched", latent=lk,
-                                    branch=br, channels=ch))
+                out.append(base_cfg(args, stage="C", model="branched", latent=lk, branch=br, channels=ch))
     return out
 
 
@@ -593,8 +687,7 @@ def stage_D(args):
     for seed in range(args.n_seeds):
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="D", model="branched",
-                                    latent=lk, branch=br, seed=seed))
+                out.append(base_cfg(args, stage="D", model="branched", latent=lk, branch=br, seed=seed))
     return out
 
 
@@ -619,12 +712,10 @@ def stage_N(args):
     """
     out = []
     for sd in args.noise_sweep:
-        out.append(base_cfg(args, stage="N", model="podlse", latent="pod",
-                            branch="closed-form", sensor_noise=sd))
+        out.append(base_cfg(args, stage="N", model="podlse", latent="pod", branch="closed-form", sensor_noise=sd))
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="N", model="branched", latent=lk,
-                                    branch=br, sensor_noise=sd))
+                out.append(base_cfg(args, stage="N", model="branched", latent=lk, branch=br, sensor_noise=sd))
     return out
 
 
@@ -632,12 +723,10 @@ def stage_W(args):
     """Adam weight decay, at fixed latent size and window."""
     out = []
     for wd in args.wd_sweep:
-        out.append(base_cfg(args, stage="W", model="podlse", latent="pod",
-                            branch="closed-form", weight_decay=wd))
+        out.append(base_cfg(args, stage="W", model="podlse", latent="pod", branch="closed-form", weight_decay=wd))
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="W", model="branched", latent=lk,
-                                    branch=br, weight_decay=wd))
+                out.append(base_cfg(args, stage="W", model="branched", latent=lk, branch=br, weight_decay=wd))
     return out
 
 
@@ -651,12 +740,10 @@ def stage_L(args):
     """
     out = []
     for lr in args.lr_sweep:
-        out.append(base_cfg(args, stage="L", model="podlse", latent="pod",
-                            branch="closed-form", lr=lr))
+        out.append(base_cfg(args, stage="L", model="podlse", latent="pod", branch="closed-form", lr=lr))
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="L", model="branched", latent=lk,
-                                    branch=br, lr=lr))
+                out.append(base_cfg(args, stage="L", model="branched", latent=lk, branch=br, lr=lr))
     return out
 
 
@@ -666,8 +753,7 @@ def stage_E(args):
     for n in args.ensemble_sweep:
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="E", model="branched", latent=lk,
-                                    branch=br, ensemble=n))
+                out.append(base_cfg(args, stage="E", model="branched", latent=lk, branch=br, ensemble=n))
     return out
 
 
@@ -685,24 +771,46 @@ def stage_R(args):
     for r in args.rank_sweep:
         for r_s in args.r_sensor_sweep:
             for ridge in args.ridge_sweep:
-                out.append(base_cfg(args, stage="R", model="podlse", latent="pod",
-                                    branch="closed-form", r_field=r,
-                                    r_sensor=r_s, ridge=ridge))
+                out.append(
+                    base_cfg(
+                        args,
+                        stage="R",
+                        model="podlse",
+                        latent="pod",
+                        branch="closed-form",
+                        r_field=r,
+                        r_sensor=r_s,
+                        ridge=ridge,
+                    )
+                )
         for lk in args.latents:
             for br in args.branches:
-                out.append(base_cfg(args, stage="R", model="branched", latent=lk,
-                                    branch=br, r_field=r))
+                out.append(base_cfg(args, stage="R", model="branched", latent=lk, branch=br, r_field=r))
     return out
 
 
-STAGES = {"A": stage_A, "B": stage_B, "C": stage_C, "D": stage_D,
-          "N": stage_N, "W": stage_W, "L": stage_L, "E": stage_E, "R": stage_R}
-STAGE_NAME = {"A": "latent-size convergence", "B": "window-length convergence",
-              "N": "input-noise regularisation",
-              "W": "weight decay", "L": "learning rate",
-              "E": "seed ensembling",
-              "C": "sensor ablation", "D": "seed spread",
-              "R": "low-rank tuning"}
+STAGES = {
+    "A": stage_A,
+    "B": stage_B,
+    "C": stage_C,
+    "D": stage_D,
+    "N": stage_N,
+    "W": stage_W,
+    "L": stage_L,
+    "E": stage_E,
+    "R": stage_R,
+}
+STAGE_NAME = {
+    "A": "latent-size convergence",
+    "B": "window-length convergence",
+    "N": "input-noise regularisation",
+    "W": "weight decay",
+    "L": "learning rate",
+    "E": "seed ensembling",
+    "C": "sensor ablation",
+    "D": "seed spread",
+    "R": "low-rank tuning",
+}
 
 
 # ── plots ─────────────────────────────────────────────────────────────────────
@@ -716,8 +824,7 @@ def _series(rows, stage, x):
             continue
         lab = r["model"] if r["model"] in ("podlse", "epod") else f"{r['latent']}+{r['branch']}"
         out.setdefault(lab, {}).setdefault(float(r[x]), []).append(float(r["nmse_test"]))
-    return {lab: (np.array(sorted(d)), np.array([np.mean(d[k]) for k in sorted(d)]))
-            for lab, d in out.items()}
+    return {lab: (np.array(sorted(d)), np.array([np.mean(d[k]) for k in sorted(d)])) for lab, d in out.items()}
 
 
 def plot_curve(rows, stage, x, xlabel, out, floors=None, logx=True):
@@ -731,8 +838,7 @@ def plot_curve(rows, stage, x, xlabel, out, floors=None, logx=True):
         fx, fy = floors
         ax.plot(fx, fy, "k--", lw=1.2, label="projection floor (best possible)")
     ax.axhline(1.0, c="k", ls=":", lw=1)
-    ax.annotate("predicting the mean", (ax.get_xlim()[0], 1.0), fontsize=7,
-                va="bottom", ha="left")
+    ax.annotate("predicting the mean", (ax.get_xlim()[0], 1.0), fontsize=7, va="bottom", ha="left")
     ax.set(xlabel=xlabel, ylabel="test NMSE", yscale="log")
     if logx:
         ax.set_xscale("log")
@@ -783,8 +889,7 @@ def plot_seeds(rows, out):
     ax.boxplot([d[k] for k in labs], tick_labels=labs)
     for i, k in enumerate(labs, 1):
         ax.plot(np.full(len(d[k]), i), d[k], "k.", ms=6, alpha=0.6)
-    ax.set(ylabel="test NMSE", yscale="log",
-           title="seed spread -- a claimed gap has to clear this")
+    ax.set(ylabel="test NMSE", yscale="log", title="seed spread -- a claimed gap has to clear this")
     ax.grid(alpha=0.3, axis="y", which="both")
     plt.setp(ax.get_xticklabels(), rotation=20, ha="right", fontsize=8)
     fig.tight_layout()
@@ -797,55 +902,78 @@ def plot_seeds(rows, out):
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_data_args(p)
 
     s = p.add_argument_group("sweep")
-    s.add_argument("--stages", nargs="+", default=["A", "B", "C", "D"],
-                   choices=list(STAGES))
-    s.add_argument("--latents-sweep", type=int, nargs="+",
-                   default=[4, 8, 16, 32, 64, 128], help="stage A: r_field values")
-    s.add_argument("--delays-sweep", type=int, nargs="+",
-                   default=[1, 2, 5, 10, 25, 50, 100], help="stage B: window lengths")
-    s.add_argument("--channel-sets", nargs="+",
-                   default=["all", "disc2", "disc3", "forces", "moments"],
-                   help="stage C: channel subsets")
+    s.add_argument("--stages", nargs="+", default=["A", "B", "C", "D"], choices=list(STAGES))
+    s.add_argument(
+        "--latents-sweep", type=int, nargs="+", default=[4, 8, 16, 32, 64, 128], help="stage A: r_field values"
+    )
+    s.add_argument(
+        "--delays-sweep", type=int, nargs="+", default=[1, 2, 5, 10, 25, 50, 100], help="stage B: window lengths"
+    )
+    s.add_argument(
+        "--channel-sets",
+        nargs="+",
+        default=["all", "disc2", "disc3", "forces", "moments"],
+        help="stage C: channel subsets",
+    )
     s.add_argument("--n-seeds", type=int, default=5, help="stage D")
-    s.add_argument("--wd-sweep", type=float, nargs="+",
-                   default=[0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
-                   help="stage W: Adam weight decay")
-    s.add_argument("--lr-sweep", type=float, nargs="+",
-                   default=[3e-4, 1e-3, 3e-3, 1e-2],
-                   help="stage L: learning rate, with the plateau schedule on")
-    s.add_argument("--ensemble", type=int, default=1,
-                   help="stage E: average the predictions of this many seeds. "
-                        "Variance reduction only -- it changes nothing about "
-                        "what a single model can represent, so a gain here is "
-                        "a statement about run-to-run spread, not capacity.")
-    s.add_argument("--ensemble-sweep", type=int, nargs="+",
-                   default=[1, 2, 3, 5, 8],
-                   help="stage E: ensemble sizes")
-    s.add_argument("--noise-sweep", type=float, nargs="+",
-                   default=[0.0, 0.05, 0.1, 0.25, 0.5, 1.0],
-                   help="stage N: sensor-noise standard deviations, in units of "
-                        "the standardised channel")
-    s.add_argument("--rank-sweep", type=int, nargs="+", default=[2, 3, 4, 6, 8],
-                   help="stage R: r_field values, at the observable ranks")
-    s.add_argument("--r-sensor-sweep", type=int, nargs="+",
-                   default=[12, 25, 50, 100, 200, 300],
-                   help="stage R: sensor-POD truncations. The top of the range is "
-                        "the number of available channels (12 sensors x 25 delays "
-                        "= 300); the previous default stopped at 200, where test "
-                        "NMSE was still falling monotonically, so the sweep was "
-                        "reporting the edge of the grid rather than a minimum.")
-    s.add_argument("--ridge-sweep", type=float, nargs="+",
-                   default=[1e-6, 1e-4, 1e-3, 1e-2, 1e-1],
-                   help="stage R: ridge values")
-    s.add_argument("--latents", nargs="+", default=["pod", "ae"],
-                   choices=["pod", "ae", "cae"])
-    s.add_argument("--branches", nargs="+", default=["linear", "mlp", "gru"],
-                   choices=["linear", "mlp", "cnn", "gru"])
+    s.add_argument(
+        "--wd-sweep",
+        type=float,
+        nargs="+",
+        default=[0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
+        help="stage W: Adam weight decay",
+    )
+    s.add_argument(
+        "--lr-sweep",
+        type=float,
+        nargs="+",
+        default=[3e-4, 1e-3, 3e-3, 1e-2],
+        help="stage L: learning rate, with the plateau schedule on",
+    )
+    s.add_argument(
+        "--ensemble",
+        type=int,
+        default=1,
+        help="stage E: average the predictions of this many seeds. "
+        "Variance reduction only -- it changes nothing about "
+        "what a single model can represent, so a gain here is "
+        "a statement about run-to-run spread, not capacity.",
+    )
+    s.add_argument("--ensemble-sweep", type=int, nargs="+", default=[1, 2, 3, 5, 8], help="stage E: ensemble sizes")
+    s.add_argument(
+        "--noise-sweep",
+        type=float,
+        nargs="+",
+        default=[0.0, 0.05, 0.1, 0.25, 0.5, 1.0],
+        help="stage N: sensor-noise standard deviations, in units of the standardised channel",
+    )
+    s.add_argument(
+        "--rank-sweep",
+        type=int,
+        nargs="+",
+        default=[2, 3, 4, 6, 8],
+        help="stage R: r_field values, at the observable ranks",
+    )
+    s.add_argument(
+        "--r-sensor-sweep",
+        type=int,
+        nargs="+",
+        default=[12, 25, 50, 100, 200, 300],
+        help="stage R: sensor-POD truncations. The top of the range is "
+        "the number of available channels (12 sensors x 25 delays "
+        "= 300); the previous default stopped at 200, where test "
+        "NMSE was still falling monotonically, so the sweep was "
+        "reporting the edge of the grid rather than a minimum.",
+    )
+    s.add_argument(
+        "--ridge-sweep", type=float, nargs="+", default=[1e-6, 1e-4, 1e-3, 1e-2, 1e-1], help="stage R: ridge values"
+    )
+    s.add_argument("--latents", nargs="+", default=["pod", "ae"], choices=["pod", "ae", "cae"])
+    s.add_argument("--branches", nargs="+", default=["linear", "mlp", "gru"], choices=["linear", "mlp", "cnn", "gru"])
 
     b = p.add_argument_group("baseline (held fixed while another axis sweeps)")
     b.add_argument("--r-field", type=int, default=64)
@@ -853,21 +981,27 @@ def main() -> int:
     b.add_argument("--n-delays", type=int, default=25)
     b.add_argument("--delay-stride", type=int, default=1)
     b.add_argument("--ridge", type=float, default=1e-4)
-    b.add_argument("--weight-decay", type=float, default=0.0,
-                   help="L2 penalty in Adam. Held fixed outside stage W.")
-    b.add_argument("--lr-factor", type=float, default=0.5,
-                   help="ReduceLROnPlateau decay factor; 1.0 disables the "
-                        "schedule and trains at a fixed rate")
-    b.add_argument("--lr-patience", type=int, default=10,
-                   help="plateau epochs before the learning rate decays")
-    b.add_argument("--sensor-noise", type=float, default=0.0,
-                   help="Gaussian noise on the sensor window during training, "
-                        "held fixed outside stage N")
-    b.add_argument("--backend", default="torch", choices=["torch", "jax"],
-                   help="torch is the default; jax runs the decompositions on "
-                        "device and supports only --latents pod")
-    b.add_argument("--pod-method", default="randomized",
-                   choices=["svd", "snapshot", "randomized", "auto"])
+    b.add_argument("--weight-decay", type=float, default=0.0, help="L2 penalty in Adam. Held fixed outside stage W.")
+    b.add_argument(
+        "--lr-factor",
+        type=float,
+        default=0.5,
+        help="ReduceLROnPlateau decay factor; 1.0 disables the schedule and trains at a fixed rate",
+    )
+    b.add_argument("--lr-patience", type=int, default=10, help="plateau epochs before the learning rate decays")
+    b.add_argument(
+        "--sensor-noise",
+        type=float,
+        default=0.0,
+        help="Gaussian noise on the sensor window during training, held fixed outside stage N",
+    )
+    b.add_argument(
+        "--backend",
+        default="torch",
+        choices=["torch", "jax"],
+        help="torch is the default; jax runs the decompositions on device and supports only --latents pod",
+    )
+    b.add_argument("--pod-method", default="randomized", choices=["svd", "snapshot", "randomized", "auto"])
 
     t = p.add_argument_group("training")
     t.add_argument("--epochs", type=int, default=400)
@@ -879,8 +1013,13 @@ def main() -> int:
     t.add_argument("--cnn-channels", type=int, nargs="+", default=[32, 64])
     t.add_argument("--lambda-field", type=float, default=0.0)
     t.add_argument("--latent-weight", default="energy", choices=["energy", "unit"])
-    t.add_argument("--ae-hidden-scale", type=float, nargs="+", default=[8, 2],
-                   help="dense AE hidden widths as multiples of the latent size")
+    t.add_argument(
+        "--ae-hidden-scale",
+        type=float,
+        nargs="+",
+        default=[8, 2],
+        help="dense AE hidden widths as multiples of the latent size",
+    )
     t.add_argument("--cae-channels", type=int, nargs="+", default=[16, 32, 64])
     t.add_argument("--ae-epochs", type=int, default=400)
     t.add_argument("--ae-batch", type=int, default=64)
@@ -897,8 +1036,7 @@ def main() -> int:
     o.add_argument("--video-frames", type=int, default=300)
     o.add_argument("--video-top", type=int, default=2)
     o.add_argument("--no-video", action="store_true")
-    o.add_argument("--no-render", action="store_true",
-                   help="write video_pack.npz but do not render on the node")
+    o.add_argument("--no-render", action="store_true", help="write video_pack.npz but do not render on the node")
     o.add_argument("--fresh", action="store_true", help="ignore an existing results.csv")
     o.add_argument("--quick", action="store_true")
 
@@ -907,14 +1045,22 @@ def main() -> int:
         # Only fill in what was not asked for explicitly. A preset that silently
         # overrides the flag you just typed is a preset you cannot debug with:
         # `--quick --latents-sweep 4 16` should sweep 4 and 16, not the preset's.
-        _apply_unless_given(args, n=900, latents_sweep=[4, 8, 16],
-                            delays_sweep=[1, 5, 15], channel_sets=["all", "disc2"],
-                            n_seeds=2, r_field=8, n_delays=10, epochs=60,
-                            ae_epochs=50, branches=["linear", "mlp"],
-                            video_frames=40)
+        _apply_unless_given(
+            args,
+            n=900,
+            latents_sweep=[4, 8, 16],
+            delays_sweep=[1, 5, 15],
+            channel_sets=["all", "disc2"],
+            n_seeds=2,
+            r_field=8,
+            n_delays=10,
+            epochs=60,
+            ae_epochs=50,
+            branches=["linear", "mlp"],
+            video_frames=40,
+        )
     if args.backend == "jax" and set(args.latents) - {"pod"}:
-        p.error("--backend jax supports only --latents pod; the AE/CAE "
-                "encoders are torch-only")
+        p.error("--backend jax supports only --latents pod; the AE/CAE encoders are torch-only")
     args.device = default_device(args.device)
     out = os.path.join(args.out, args.tag)
     os.makedirs(out, exist_ok=True)
@@ -956,8 +1102,7 @@ def main() -> int:
                 done[key_of(r)] = r
         print(f"  resuming: {len(done)} rows already in {csv_path}")
     todo = [c for c in plan if key_of(c) not in done]
-    print(f"  {len(plan)} configurations, {len(todo)} to run "
-          f"({len(plan) - len(todo)} cached)")
+    print(f"  {len(plan)} configurations, {len(todo)} to run ({len(plan) - len(todo)} cached)")
     for st in args.stages:
         n = sum(1 for c in todo if c["stage"] == st)
         print(f"    stage {st}  {STAGE_NAME[st]:28s} {n:>4d} fits")
@@ -986,23 +1131,17 @@ def main() -> int:
 
     rule("3. plots")
     Psi, Sigma, qm = latents.pod_basis(max(args.latents_sweep + [args.r_field]))
-    floors = ([r for r in args.latents_sweep],
-              [projection_floor(Q[:, te], Psi[:, :r], qm) for r in args.latents_sweep])
-    plot_curve(rows, "A", "r_field", "latent size $r$",
-               os.path.join(out, "convergence_latent.png"), floors=floors)
-    plot_curve(rows, "B", "n_delays", "window length $L$ [samples]",
-               os.path.join(out, "convergence_delays.png"))
+    floors = ([r for r in args.latents_sweep], [projection_floor(Q[:, te], Psi[:, :r], qm) for r in args.latents_sweep])
+    plot_curve(rows, "A", "r_field", "latent size $r$", os.path.join(out, "convergence_latent.png"), floors=floors)
+    plot_curve(rows, "B", "n_delays", "window length $L$ [samples]", os.path.join(out, "convergence_delays.png"))
     plot_ablation(rows, os.path.join(out, "ablation_sensors.png"))
     plot_seeds(rows, os.path.join(out, "seed_spread.png"))
-    rp.plot_spectrum(Sigma, os.path.join(out, "spectrum.png"),
-                     floors={f"r={r}": r for r in args.latents_sweep})
-    Sd = delay_embed(S, args.n_delays, args.delay_stride,
-                     args.delay_ahead)[:, tr]
+    rp.plot_spectrum(Sigma, os.path.join(out, "spectrum.png"), floors={f"r={r}": r for r in args.latents_sweep})
+    Sd = delay_embed(S, args.n_delays, args.delay_stride, args.delay_ahead)[:, tr]
     Sc = Sd - Sd.mean(1, keepdims=True)
     sd = Sc.std(1, keepdims=True)
     _, _, C, _ = pod(Sc / np.where(sd > 0, sd, 1.0), args.r_sensor)
-    rp.plot_observability(mode_observability(Psi.T @ (Q[:, tr] - qm), C),
-                          os.path.join(out, "observability.png"))
+    rp.plot_observability(mode_observability(Psi.T @ (Q[:, tr] - qm), C), os.path.join(out, "observability.png"))
 
     if not args.no_video:
         rule("4. video pack")
@@ -1016,8 +1155,7 @@ def main() -> int:
             # linear ones are a solve and the autoencoders come out of the cache.
             print("  nothing refitted this run; rebuilding from the best rows")
             for r in _video_rows(rows):
-                fit_one(_cfg_from_row(r), Q, S, tr, te, latents, args, videos,
-                        Q_full)
+                fit_one(_cfg_from_row(r), Q, S, tr, te, latents, args, videos, Q_full)
             _write_videos(videos, Q, te, unflat, case0, out, args)
         else:
             _write_videos(videos, Q, te, unflat, case0, out, args)
@@ -1046,11 +1184,17 @@ def _cfg_from_row(r) -> dict:
     experiment at worst.
     """
     rs = _norm(r["r_sensor"])
-    return dict(stage=r["stage"], model=r["model"], latent=r["latent"],
-                branch=r["branch"], r_field=int(r["r_field"]),
-                r_sensor=None if rs == "None" else int(rs),
-                n_delays=int(r["n_delays"]), channels=r["channels"],
-                seed=int(r["seed"]))
+    return dict(
+        stage=r["stage"],
+        model=r["model"],
+        latent=r["latent"],
+        branch=r["branch"],
+        r_field=int(r["r_field"]),
+        r_sensor=None if rs == "None" else int(rs),
+        n_delays=int(r["n_delays"]),
+        channels=r["channels"],
+        seed=int(r["seed"]),
+    )
 
 
 def _video_rows(rows, k=2):
@@ -1089,13 +1233,14 @@ def _write_videos(videos, Q, te, unflat, case0, out, args):
     """
     n = min(args.video_frames, len(te))
     truth = unflat(Q[:, te[:n]], dtype=np.float32)
-    pack = {"truth": truth,
-            "x": case0.mf.x if case0.mf else np.arange(truth.shape[2], dtype=float),
-            "y": case0.mf.y if case0.mf else np.arange(truth.shape[3], dtype=float)}
+    pack = {
+        "truth": truth,
+        "x": case0.mf.x if case0.mf else np.arange(truth.shape[2], dtype=float),
+        "y": case0.mf.y if case0.mf else np.arange(truth.shape[3], dtype=float),
+    }
     meta = {"dt": args.stride / F_PIV_HZ, "run": args.run, "labels": {}}
 
-    for i, (label, (err, pred, pinned)) in enumerate(sorted(videos.items.items(),
-                                                            key=lambda kv: kv[1][0])):
+    for i, (label, (err, pred, pinned)) in enumerate(sorted(videos.items.items(), key=lambda kv: kv[1][0])):
         k = f"pred_{i}"
         pack[k] = unflat(pred[:, :n].astype(np.float64), dtype=np.float32)
         meta["labels"][k] = {"label": label, "nmse": float(err), "pinned": bool(pinned)}
@@ -1111,9 +1256,13 @@ def _write_videos(videos, Q, te, unflat, case0, out, args):
         return
     for k, info in meta["labels"].items():
         p = rp.animate_reconstruction(
-            pack["truth"], pack[k],
-            os.path.join(out, f"reconstruction_{k}.mp4"), mf=case0.mf,
-            n_frames=n, title=f"{info['label']}  NMSE {info['nmse']:.3f}")
+            pack["truth"],
+            pack[k],
+            os.path.join(out, f"reconstruction_{k}.mp4"),
+            mf=case0.mf,
+            n_frames=n,
+            title=f"{info['label']}  NMSE {info['nmse']:.3f}",
+        )
         print(f"  wrote {p}")
 
 

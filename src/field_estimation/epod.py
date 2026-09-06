@@ -2,7 +2,7 @@
 
 Snapshot POD, extended POD (Borée 2003), and POD with linear stochastic
 estimation (POD-LSE). These are the baseline and the reference implementation
-for the two-branch autoencoder in `tools/branched_ae.py`.
+for the two-branch autoencoder in `branched_ae.py`.
 
 All arrays are column-per-snapshot: `Q` is (N_x, N_t), `S` is (N_s, N_t). Array
 conventions match `models/data_driven/autoencoders/pod_utils.py`:
@@ -28,7 +28,7 @@ Rank limit
 A linear estimator reconstructs into the column space of `Psi M Phi.T`, whose
 rank is at most `r_sensor <= N_s`, so `r_field` above `r_sensor` gains nothing.
 Widen it with `delay_embed`, which raises the bound to `N_s * n_delays`, or with
-the nonlinear map in `tools/branched_ae.py`. Call `mode_observability` to
+the nonlinear map in `branched_ae.py`. Call `mode_observability` to
 measure how much of the field the sensors actually reach.
 
 Dense NumPy throughout. On a 31258 x 6085 field a truncated fit takes seconds;
@@ -36,7 +36,7 @@ an exact SVD takes minutes and about 4 GB.
 
 Typical usage:
 
-    from tools.epod import PODLSE, delay_embed, split_train_test
+    from field_estimation.epod import PODLSE, delay_embed, split_train_test
 
     Sd = delay_embed(S, n_delays=25)          # embed the full record once
     tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)

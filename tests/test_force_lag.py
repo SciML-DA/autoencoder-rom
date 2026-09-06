@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from datasets.sparse_sensors import apply_force_lag  # noqa: E402
+from experiments.april_wake.data_preprocessing import apply_force_lag  # noqa: E402
 
 TRUE_LAG = 25  # the --force-lag that should restore alignment
 

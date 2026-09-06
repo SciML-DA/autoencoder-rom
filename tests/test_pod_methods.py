@@ -31,7 +31,7 @@ import pytest
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from tools.epod import pod  # noqa: E402
+from field_estimation.epod import pod  # noqa: E402
 
 # energy fractions of the leading modes, measured on 4p5d_10ms_yaw_0_0_0
 MEASURED = np.array([0.213, 0.142, 0.112, 0.052, 0.047, 0.033, 0.027, 0.024,

@@ -4,7 +4,14 @@
 # GPU nodes. These are the same small fits, so the widened pool costs nothing.
 # Note the constraint has not actually been exercised yet -- every job so far
 # landed on an L40S regardless -- so RTX6000 (24 GB) remains untested here.
-#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+# gpu_type=RTX6000 is deliberate, and NOT a typo for 'any GPU'. v1_gpu72
+# sets `default_chunk.gpu_type = L40S`, so omitting gpu_type does not widen
+# the pool -- PBS silently re-adds L40S and the job joins ~237 others
+# queued for the 2 free L40S GPUs while 8 RTX6000s sit idle. Naming a type
+# is the only way to override a queue default. These fits are hundreds to
+# thousands of parameters; 24 GB is ample. Override with -l select=... on
+# the qsub line if a run ever needs the bigger card.
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1:gpu_type=RTX6000
 #PBS -l walltime=04:00:00
 #PBS -o logs/
 #PBS -e logs/
