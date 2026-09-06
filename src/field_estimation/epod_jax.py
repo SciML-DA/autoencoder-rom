@@ -2,8 +2,8 @@
 
 Ports snapshot POD, extended POD (Borée 2003), and POD-LSE from `epod.py`,
 running the decompositions on device. The API mirrors `epod.py`, so the two are
-interchangeable in `scripts/sparse_sensor_study.py` and
-`scripts/sparse_sensor_sweep.py`.
+interchangeable in `experiments/april_wake/scripts/sparse_sensor_study.py` and
+`experiments/april_wake/scripts/sparse_sensor_sweep.py`.
 
 `epod.py` remains the reference implementation; where the two disagree, trust
 the NumPy version. Use this module when the linear stage costs enough to matter.
@@ -206,7 +206,7 @@ def lse_map_jax(B, C, ridge: float = 0.0, dtype="float64"):
 def ridge_cv_jax(B, C, B_val, C_val, ridges, dtype="float64"):
     """Evaluates validation NMSE for every ridge value in one batched solve.
 
-    The eight-value ridge sweep in `scripts/sparse_sensor_study.py` takes
+    The eight-value ridge sweep in `experiments/april_wake/scripts/sparse_sensor_study.py` takes
     between 19 and 192 seconds per delay length in NumPy, because each value
     refits from scratch. This function forms the Gram matrix once and maps only
     the solve over `ridges`, so the whole sweep costs little more than one fit.

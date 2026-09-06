@@ -5,8 +5,8 @@ convergence_diagnosis.py
 
 Is the branched network under-fitting, or is it at the information limit?
 
-    qsub hpc/convergence_diagnosis.pbs
-    python scripts/convergence_diagnosis.py --run 4p5d_10ms_yaw_0_0_0 --quick
+    qsub experiments/april_wake/hpc/convergence_diagnosis.pbs
+    python experiments/april_wake/scripts/convergence_diagnosis.py --run 4p5d_10ms_yaw_0_0_0 --quick
 
 Every sweep so far has produced the same flat picture: no latent size, no
 branch architecture and no choice of POD-versus-autoencoder moves test NMSE by
@@ -65,7 +65,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import add_data_args, load_data, make_split  # noqa: E402
 from field_estimation.branched_ae import BranchedAE, LinearLatent, TorchLatent  # noqa: E402

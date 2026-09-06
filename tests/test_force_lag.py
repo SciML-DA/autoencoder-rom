@@ -22,6 +22,9 @@ import sys
 import numpy as np
 import pytest
 
+# the repo root, for `experiments` -- which lives outside src/ and so is
+# deliberately not part of the installed package
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from experiments.april_wake.data_preprocessing import apply_force_lag  # noqa: E402

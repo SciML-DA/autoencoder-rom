@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Submit N copies of a job, each depending on the previous one finishing.
 #
-#   ./hpc/qsub_chain.sh 3 hpc/sparse_sensor_sweep.pbs
-#   ./hpc/qsub_chain.sh 4 hpc/sparse_sensor_sweep.pbs -v TAG=main,LATENTS="pod ae cae"
+#   ./hpc/qsub_chain.sh 3 experiments/april_wake/hpc/sparse_sensor_sweep.pbs
+#   ./hpc/qsub_chain.sh 4 experiments/april_wake/hpc/sparse_sensor_sweep.pbs -v TAG=main,LATENTS="pod ae cae"
 #
 # Only useful for a job that is *resumable*, which sparse_sensor_sweep.py is:
 # each link reads the CSV and the autoencoder cache written by the last one and

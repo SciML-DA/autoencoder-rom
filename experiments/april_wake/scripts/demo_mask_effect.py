@@ -6,7 +6,7 @@ demo_mask_effect.py
 Why "drop a point if it is invalid in any frame" destroys a wake reconstruction,
 on synthetic data where the truth is known.
 
-    python scripts/demo_mask_effect.py
+    python experiments/april_wake/scripts/demo_mask_effect.py
 
 `build_case` used to keep a grid point only if it carried a valid vector in
 *every* snapshot. That is the right rule for a solid body, which never moves,
@@ -31,7 +31,10 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from field_estimation.epod import PODLSE, delay_embed, nmse  # noqa: E402
 

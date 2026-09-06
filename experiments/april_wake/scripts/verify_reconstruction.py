@@ -13,10 +13,10 @@ exactly rank-r expansion built here in forty lines, which turns "did my POD
 work?" into a machine-precision assertion instead of a judgement call, and the
 data-layer checks run against an RDS-shaped directory written into a temp dir.
 
-    python scripts/verify_reconstruction.py           # all checks
-    python scripts/verify_reconstruction.py -k epod   # only matching names
-    python scripts/verify_reconstruction.py -v        # show every number
-    python scripts/verify_reconstruction.py --slow    # + the end-to-end study run
+    python experiments/april_wake/scripts/verify_reconstruction.py           # all checks
+    python experiments/april_wake/scripts/verify_reconstruction.py -k epod   # only matching names
+    python experiments/april_wake/scripts/verify_reconstruction.py -v        # show every number
+    python experiments/april_wake/scripts/verify_reconstruction.py --slow    # + the end-to-end study run
 
 The checks that matter most, in order
 -------------------------------------
@@ -52,7 +52,10 @@ import traceback
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake import case_reader as we  # noqa: E402
 from field_estimation.branched_ae import (  # noqa: E402

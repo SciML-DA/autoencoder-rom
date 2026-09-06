@@ -1,6 +1,6 @@
 # diagnosis
 
-**From:** `qsub hpc/diagnose.pbs` → `scripts/diagnose_sensors.py --out results/diagnosis`.
+**From:** `qsub experiments/april_wake/hpc/diagnose.pbs` → `experiments/april_wake/scripts/diagnose_sensors.py --out results/diagnosis`.
 CPU only; it is all linear algebra and a lag scan.
 
 **Purpose:** find out why sparse-sensor reconstruction plateaus at NMSE ~0.83 no
@@ -22,4 +22,4 @@ a random split flatters the same model), and the force spectrum.
   forces at 14.4/16.5/17.0 Hz on the theory that they were rig resonance.
   **The notch was rejected:** it halved the observability, because that band is
   wake meandering (St ~ 0.075), not the rig. Kept as the record —
-  `hpc/lowrank.pbs` points at this file when it says not to add `--notch`.
+  `experiments/april_wake/hpc/lowrank.pbs` points at this file when it says not to add `--notch`.

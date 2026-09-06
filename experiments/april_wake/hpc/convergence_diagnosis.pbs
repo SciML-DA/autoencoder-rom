@@ -8,7 +8,7 @@
 #
 # Is the branched network under-fitting, or at the information limit?
 #
-#   qsub hpc/convergence_diagnosis.pbs
+#   qsub experiments/april_wake/hpc/convergence_diagnosis.pbs
 #   tail -f logs/convdiag.*.live
 #
 # Answers the one question that makes every architecture comparison in the
@@ -36,7 +36,7 @@ hpc_gpu
 
 EXTRA="${EXTRA:-}"
 
-uv run python scripts/convergence_diagnosis.py \
+uv run python experiments/april_wake/scripts/convergence_diagnosis.py \
     --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
     --tag "${TAG:-default}" \
     --r-field "${R_FIELD:-16}" \

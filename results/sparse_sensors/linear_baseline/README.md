@@ -1,6 +1,6 @@
 # sparse_sensors / linear_baseline
 
-**From:** `qsub hpc/sensors.pbs` → `scripts/sparse_sensor_study.py` with
+**From:** `qsub experiments/april_wake/hpc/sensors.pbs` → `experiments/april_wake/scripts/sparse_sensor_study.py` with
 `--branches` empty, i.e. **POD-LSE and extended POD only, no networks**. CPU,
 `--r-field 64`, `--delays 1 5 10 25 50 100`, `--ridge-cv`, `--force-lag 0`, on
 run `4p5d_10ms_yaw_0_0_0`. Full arguments in `config.json`.

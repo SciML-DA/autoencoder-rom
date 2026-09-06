@@ -5,8 +5,8 @@ podlse_sweep.py
 
 Tune the linear reference itself.
 
-    qsub -v BAND=20 hpc/podlse_sweep.pbs
-    python scripts/podlse_sweep.py --band-hz 20 --tag b20
+    qsub -v BAND=20 experiments/april_wake/hpc/podlse_sweep.pbs
+    python experiments/april_wake/scripts/podlse_sweep.py --band-hz 20 --tag b20
 
 Why this exists
 ---------------
@@ -48,7 +48,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from hyper_search import three_way  # noqa: E402  same splits, deliberately
 

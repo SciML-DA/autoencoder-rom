@@ -20,6 +20,9 @@ import types
 import numpy as np
 import pytest
 
+# the repo root, for `experiments` -- which lives outside src/ and so is
+# deliberately not part of the installed package
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from experiments.april_wake.data_preprocessing import make_split  # noqa: E402
@@ -126,7 +129,8 @@ def test_nmse_by_run_is_self_normalised():
     """
     import sys as _sys
 
-    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     "experiments", "april_wake", "scripts"))
     from sparse_sensor_study import nmse_by_run
 
     rng = np.random.default_rng(0)
@@ -159,7 +163,8 @@ def test_nmse_by_run_is_self_normalised():
 def test_nmse_by_run_is_empty_for_a_single_run():
     import sys as _sys
 
-    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     "experiments", "april_wake", "scripts"))
     from sparse_sensor_study import nmse_by_run
 
     Q = np.random.default_rng(0).standard_normal((10, 50))

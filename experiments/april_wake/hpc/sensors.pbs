@@ -12,7 +12,7 @@
 #
 # Linear baselines only -- POD-LSE and extended POD on the April experiment.
 # CPU only, deliberately: both are one SVD and one small solve, so a GPU would
-# sit idle. The two-branch autoencoders live in hpc/sparse_sensors.pbs, which
+# sit idle. The two-branch autoencoders live in experiments/april_wake/hpc/sparse_sensors.pbs, which
 # does ask for one.
 #
 # Run this before the GPU job. It produces the number every later claim is
@@ -26,8 +26,8 @@
 # RDS, which is the access pattern that filesystem is worst at, and every ridge
 # CV solve sees 5x the snapshots.
 #
-#   qsub hpc/sensors.pbs
-#   qsub -v FORCE_LAG=-25 hpc/sensors.pbs      # after the lag calibration
+#   qsub experiments/april_wake/hpc/sensors.pbs
+#   qsub -v FORCE_LAG=-25 experiments/april_wake/hpc/sensors.pbs      # after the lag calibration
 
 set -euo pipefail
 source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
@@ -52,7 +52,7 @@ hpc_init
 # word-splits into separate arguments; keep each flag and value simple.
 EXTRA="${EXTRA:-}"
 
-uv run python scripts/sparse_sensor_study.py \
+uv run python experiments/april_wake/scripts/sparse_sensor_study.py \
     --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
     --tag "${TAG:-linear_baseline}" \
     --r-field "${R_FIELD:-64}" \

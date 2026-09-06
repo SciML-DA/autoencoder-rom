@@ -16,6 +16,7 @@ job script are the ones that break.
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import shlex
@@ -29,11 +30,17 @@ from test_sparse_sensors import _write_fixture  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Jobs live in two places: hpc/ for the ones not tied to a rig, and
+# experiments/<campaign>/hpc/ for the ones that are. Paths here are
+# repo-relative so a job can move between them without editing this list twice.
+AW = "experiments/april_wake/hpc"
+
 # Scripts that load experiment data. convergence.pbs uses a different dataset and
 # sparse_sensors_crossyaw.pbs needs several runs, so both are covered elsewhere.
-JOBS = ["lowrank.pbs", "sensors.pbs", "diagnose.pbs", "sparse_sensors.pbs",
-        "sparse_sensor_sweep.pbs", "spectra.pbs",
-        "convergence_diagnosis.pbs", "loss_curves.pbs", "hyper_search.pbs"]
+JOBS = [f"{AW}/{j}" for j in
+        ["lowrank.pbs", "sensors.pbs", "diagnose.pbs", "sparse_sensors.pbs",
+         "sparse_sensor_sweep.pbs", "spectra.pbs",
+         "convergence_diagnosis.pbs", "loss_curves.pbs", "hyper_search.pbs"]]
 
 # Overrides that make a cluster-sized job finish in seconds. Applied last, so
 # they win over whatever the job script sets.
@@ -75,7 +82,7 @@ def extract_command(job: str) -> list[str]:
         f'cd {shlex.quote(REPO)}\n'
         f'PBS_O_WORKDIR={shlex.quote(REPO)} PBS_JOBID=preflight.0 '
         'PBS_JOBNAME=preflight NCPUS=2\n'
-        f'source {shlex.quote(os.path.join(REPO, "hpc", job))}\n'
+        f'source {shlex.quote(os.path.join(REPO, job))}\n'
     )
     p = subprocess.run(["bash", "-c", probe], capture_output=True, text=True,
                        cwd=REPO, timeout=300)
@@ -99,7 +106,12 @@ def test_job_script_command_runs(job, tmp_path):
     run, _ = _write_fixture(root, n_t=300)
 
     # drop the job's own --out/--tag/--run/--cache-dir, then apply the small profile
-    path = os.path.join(REPO, "scripts", script)
+    #
+    # Resolved from the job's own argv rather than by assuming a directory: the
+    # rig-specific entry points live under experiments/<campaign>/scripts/
+    # and the generic ones under scripts/, and this should not need editing
+    # again the next time one moves.
+    path = os.path.join(REPO, argv[0])
     argv = _strip(argv, {"--out", "--tag", "--run", "--cache-dir"})
     extra = ["--run", run, "--out", str(tmp_path)]
     if "--tag" in _help(path):
@@ -137,8 +149,11 @@ def _strip(argv: list[str], flags: set[str]) -> list[str]:
     return out
 
 
-ALL_JOBS = sorted(f for f in os.listdir(os.path.join(REPO, "hpc"))
-                  if f.endswith(".pbs"))
+ALL_JOBS = sorted(
+    os.path.relpath(f, REPO)
+    for pattern in ("hpc/*.pbs", "experiments/*/hpc/*.pbs")
+    for f in glob.glob(os.path.join(REPO, pattern))
+)
 
 
 @pytest.mark.parametrize("job", ALL_JOBS)
@@ -150,7 +165,7 @@ def test_job_script_uses_the_shared_setup(job):
     inherited through `qsub -V`, so that job ran single-threaded on eight cores
     and said `threads: 1 (NCPUS=1, nproc=1)` in a log nobody reread.
     """
-    src = open(os.path.join(REPO, "hpc", job)).read()
+    src = open(os.path.join(REPO, job)).read()
     assert "hpc/lib.sh" in src, f"{job} does not source hpc/lib.sh"
     assert "unset OMP_NUM_THREADS" not in src, (
         f"{job} has its own thread block again -- it belongs in hpc/lib.sh"
@@ -219,6 +234,6 @@ def test_falls_back_and_caps():
 
 @pytest.mark.parametrize("job", ALL_JOBS)
 def test_job_script_is_valid_bash(job):
-    p = subprocess.run(["bash", "-n", os.path.join(REPO, "hpc", job)],
+    p = subprocess.run(["bash", "-n", os.path.join(REPO, job)],
                        capture_output=True, text=True)
     assert p.returncode == 0, p.stderr

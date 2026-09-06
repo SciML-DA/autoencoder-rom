@@ -13,7 +13,7 @@
 #
 # This is the *other* convergence study -- it answers "how far does a nonlinear
 # encoder beat a linear one at fixed latent size" on clean simulation data. The
-# sparse-sensor convergence study is hpc/sparse_sensor_sweep.pbs and shares
+# sparse-sensor convergence study is experiments/april_wake/hpc/sparse_sensor_sweep.pbs and shares
 # nothing with it but the word.
 
 set -euo pipefail

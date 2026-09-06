@@ -3,13 +3,13 @@
 # Submit the convergence study as a dependency chain, in the order the science
 # requires rather than the order the queue would give you.
 #
-#     ./hpc/run_study.sh phase1              # ~2.5 h  (verify+spectra+diagnose)
-#     FORCE_LAG=-25 ./hpc/run_study.sh phase2  # ~30 h of chained links
-#     ./hpc/run_study.sh phase3              # the held-out-yaw test
+#     ./experiments/april_wake/hpc/run_study.sh phase1              # ~2.5 h  (verify+spectra+diagnose)
+#     FORCE_LAG=-25 ./experiments/april_wake/hpc/run_study.sh phase2  # ~30 h of chained links
+#     ./experiments/april_wake/hpc/run_study.sh phase3              # the held-out-yaw test
 #
 # `phase1` submits THREE jobs (verify, spectra, diagnose). It is not the same
-# thing as `qsub hpc/diagnose.pbs`, which submits only the last of them.
-#     ./hpc/run_study.sh all                 # 1 then 2, with 2 using FORCE_LAG
+# thing as `qsub experiments/april_wake/hpc/diagnose.pbs`, which submits only the last of them.
+#     ./experiments/april_wake/hpc/run_study.sh all                 # 1 then 2, with 2 using FORCE_LAG
 #
 # Add -n to print the qsub commands without submitting anything.
 #
@@ -59,9 +59,9 @@ case "$PHASE" in
 
 phase1|diagnose)
     banner "phase 1: verify -> spectra -> diagnose"
-    a=$(sub "" hpc/verify.pbs);                     echo "  verify   $a" >&2
-    b=$(sub "$a" hpc/spectra.pbs);                  echo "  spectra  $b" >&2
-    c=$(sub "$b" hpc/diagnose.pbs);                 echo "  diagnose $c" >&2
+    a=$(sub "" experiments/april_wake/hpc/verify.pbs);                     echo "  verify   $a" >&2
+    b=$(sub "$a" experiments/april_wake/hpc/spectra.pbs);                  echo "  spectra  $b" >&2
+    c=$(sub "$b" experiments/april_wake/hpc/diagnose.pbs);                 echo "  diagnose $c" >&2
     cat >&2 <<'MSG'
 
   When they finish:
@@ -81,7 +81,7 @@ phase2|sweep)
   NOTE: FORCE_LAG=0. If phase 1 found a non-zero offset, this reproduces the
         plateau you already have. Re-run with FORCE_LAG=<n> to test the fix.
 MSG
-    a=$(sub "" -v "FORCE_LAG=$FORCE_LAG" hpc/lowrank.pbs)
+    a=$(sub "" -v "FORCE_LAG=$FORCE_LAG" experiments/april_wake/hpc/lowrank.pbs)
     echo "  lowrank  $a" >&2
     # The sweep is resumable: each link reads the CSV and the autoencoder cache
     # the last one wrote and continues. afterany, not afterok -- a link killed at
@@ -90,7 +90,7 @@ MSG
     prev="$a"
     for ((i = 1; i <= LINKS; i++)); do
         prev=$(sub "$prev" -v "FORCE_LAG=$FORCE_LAG,TAG=${TAG:-main}" \
-                   hpc/sparse_sensor_sweep.pbs)
+                   experiments/april_wake/hpc/sparse_sensor_sweep.pbs)
         echo "  sweep $i/$LINKS  $prev" >&2
     done
     echo >&2
@@ -100,7 +100,7 @@ MSG
 
 phase3|crossyaw)
     banner "phase 3: held-out yaw (array job, the generalisation test)"
-    a=$(sub "" -v "FORCE_LAG=$FORCE_LAG" hpc/sparse_sensors_crossyaw.pbs)
+    a=$(sub "" -v "FORCE_LAG=$FORCE_LAG" experiments/april_wake/hpc/sparse_sensors_crossyaw.pbs)
     echo "  crossyaw $a" >&2
     ;;
 

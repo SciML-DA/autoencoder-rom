@@ -1,13 +1,13 @@
 # sparse_sensors
 
-**From:** `scripts/sparse_sensor_study.py`, one subfolder per `--tag`. Three
+**From:** `experiments/april_wake/scripts/sparse_sensor_study.py`, one subfolder per `--tag`. Three
 jobs write here:
 
 | job | tag | what it runs |
 |---|---|---|
-| `hpc/sensors.pbs` | `linear_baseline` | linear baselines only, CPU, minutes |
-| `hpc/sparse_sensors.pbs` | the run name | the two-branch autoencoders, GPU, hours |
-| `hpc/sparse_sensors_crossyaw.pbs` | `xyaw_<run>` | held-out-yaw array job, one index per run |
+| `experiments/april_wake/hpc/sensors.pbs` | `linear_baseline` | linear baselines only, CPU, minutes |
+| `experiments/april_wake/hpc/sparse_sensors.pbs` | the run name | the two-branch autoencoders, GPU, hours |
+| `experiments/april_wake/hpc/sparse_sensors_crossyaw.pbs` | `xyaw_<run>` | held-out-yaw array job, one index per run |
 
 **Purpose:** reconstruct the PIV velocity field around disc 2 from the twelve
 load-cell channels alone, with every method in the repo, on one contiguous

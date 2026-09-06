@@ -5,8 +5,8 @@ hyper_search.py
 
 The staged hyperparameter search over the branched-AE architecture.
 
-    qsub hpc/hyper_search.pbs
-    python scripts/hyper_search.py --stages screen          # then pair, random
+    qsub experiments/april_wake/hpc/hyper_search.pbs
+    python experiments/april_wake/scripts/hyper_search.py --stages screen          # then pair, random
 
 Everything that defines the search lives in the CONFIG block below, not on the
 command line. There are seventeen axes; passing them as flags would produce a
@@ -54,7 +54,10 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,

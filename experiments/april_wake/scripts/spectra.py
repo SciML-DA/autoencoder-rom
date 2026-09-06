@@ -7,8 +7,8 @@ The frequency-domain view of the sparse-sensor problem: what the load cells
 carry, what the flow carries, and at which frequencies the two are linearly
 related.
 
-    qsub hpc/spectra.pbs
-    python scripts/spectra.py --run 4p5d_10ms_yaw_0_0_0
+    qsub experiments/april_wake/hpc/spectra.pbs
+    python experiments/april_wake/scripts/spectra.py --run 4p5d_10ms_yaw_0_0_0
 
 `diagnose_sensors.py` answers "how much of the field can twelve load cells
 explain" with one broadband number, and that number (NMSE ~0.83) is what has
@@ -61,7 +61,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from scipy import signal  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import add_data_args, load_data, make_split  # noqa: E402
 from experiments.april_wake.case_reader import (  # noqa: E402

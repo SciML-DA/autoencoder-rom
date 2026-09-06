@@ -55,13 +55,13 @@ script's command against a synthetic RDS-shaped directory. Then, with
 `RDS_ROOT` pointing at the real thing:
 
 ```bash
-python scripts/sparse_sensor_study.py --quick     # one split, every method
-python scripts/sparse_sensor_sweep.py  --quick    # the convergence study
+python experiments/april_wake/scripts/sparse_sensor_study.py --quick     # one split, every method
+python experiments/april_wake/scripts/sparse_sensor_sweep.py  --quick    # the convergence study
 ```
 
 The sweep is resumable and caches fitted autoencoders, so a cluster job killed
 at walltime continues where it stopped. It also writes a `video_pack.npz` that
-[make_reconstruction_video.py](scripts/make_reconstruction_video.py) turns into
+[make_reconstruction_video.py](experiments/april_wake/scripts/make_reconstruction_video.py) turns into
 truth/reconstruction/error footage — that script imports nothing from `src/`, so
 it runs wherever you have ffmpeg rather than wherever you have torch.
 
@@ -208,7 +208,7 @@ script's `--help`, and confirms the BLAS runs on the threads it was given. Add
 Then submit the study as a chain rather than by hand:
 
 ```bash
-./hpc/run_study.sh diagnose
+./experiments/april_wake/hpc/run_study.sh diagnose
 ```
 
 Phase 1 is verify → spectra → diagnose. It measures the PIV/force offset two
@@ -217,7 +217,7 @@ independent ways; pass the result to phase 2 as `FORCE_LAG`, because
 direction no matter how long the window.
 
 ```bash
-FORCE_LAG=-25 ./hpc/run_study.sh sweep
+FORCE_LAG=-25 ./experiments/april_wake/hpc/run_study.sh sweep
 ```
 
 ---

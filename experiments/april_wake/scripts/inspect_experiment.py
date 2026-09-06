@@ -12,7 +12,7 @@ files. Everything it prints is either a check that must pass or a number the
 force reader needs.
 
     module load tools/prod SciPy-bundle/2025.06-gfbf-2025a
-    python scripts/inspect_experiment.py
+    python experiments/april_wake/scripts/inspect_experiment.py
 
 Login-node safe: it reads one snapshot per run and the head of two .dat files,
 nothing more.
@@ -24,7 +24,10 @@ import os
 import sys
 import traceback
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 import numpy as np  # noqa: E402
 

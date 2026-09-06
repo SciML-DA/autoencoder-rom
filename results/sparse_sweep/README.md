@@ -1,8 +1,8 @@
 # sparse_sweep
 
-**From:** `scripts/sparse_sensor_sweep.py`, one subfolder per `--tag`, submitted
-by `hpc/sparse_sensor_sweep.pbs` (the sweep proper) and `hpc/lowrank.pbs`
-(stage R). Both are chained by `./hpc/run_study.sh phase2`.
+**From:** `experiments/april_wake/scripts/sparse_sensor_sweep.py`, one subfolder per `--tag`, submitted
+by `experiments/april_wake/hpc/sparse_sensor_sweep.pbs` (the sweep proper) and `experiments/april_wake/hpc/lowrank.pbs`
+(stage R). Both are chained by `./experiments/april_wake/hpc/run_study.sh phase2`.
 
 **Purpose:** the convergence study for sparse-sensor reconstruction — the
 analogue of `../convergence/` for this task. It sweeps one axis at a time

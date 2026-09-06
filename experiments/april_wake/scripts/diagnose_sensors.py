@@ -5,8 +5,8 @@ diagnose_sensors.py
 
 Why the reconstruction plateaus at NMSE ~0.83 no matter what you throw at it.
 
-    qsub hpc/diagnose.pbs
-    python scripts/diagnose_sensors.py --run 4p5d_10ms_yaw_0_0_0
+    qsub experiments/april_wake/hpc/diagnose.pbs
+    python experiments/april_wake/scripts/diagnose_sensors.py --run 4p5d_10ms_yaw_0_0_0
 
 The sweep produced a very specific signature: test NMSE is flat at 0.83-0.85
 across latent size 4..128, across linear/MLP/CNN/GRU sensor branches, and across
@@ -42,7 +42,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import add_data_args, load_data, make_split  # noqa: E402
 from experiments.april_wake.case_reader import F_FORCE_HZ, F_PIV_HZ, RUNS  # noqa: E402

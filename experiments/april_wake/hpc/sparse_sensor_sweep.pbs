@@ -12,16 +12,16 @@
 
 # The convergence study for sparse-sensor reconstruction.
 #
-#   qsub hpc/sparse_sensor_sweep.pbs
-#   qsub -v STAGES="A B",TAG=quicklook hpc/sparse_sensor_sweep.pbs
-#   qsub -v LATENTS="pod ae cae",WALL=48 hpc/sparse_sensor_sweep.pbs
+#   qsub experiments/april_wake/hpc/sparse_sensor_sweep.pbs
+#   qsub -v STAGES="A B",TAG=quicklook experiments/april_wake/hpc/sparse_sensor_sweep.pbs
+#   qsub -v LATENTS="pod ae cae",WALL=48 experiments/april_wake/hpc/sparse_sensor_sweep.pbs
 #
 # **This job is resumable.** The CSV is appended row by row and read back on
 # startup, and fitted autoencoders are cached to disk, so a job killed at
 # walltime picks up where it stopped. If it does not finish, just resubmit the
 # same command -- or chain it in advance:
 #
-#   ./hpc/qsub_chain.sh 3 hpc/sparse_sensor_sweep.pbs
+#   ./hpc/qsub_chain.sh 3 experiments/april_wake/hpc/sparse_sensor_sweep.pbs
 #
 # Rough cost at the real problem size (6085 snapshots, 31258 rows):
 #
@@ -79,7 +79,7 @@ echo "stages : $STAGES"
 echo "r_sensor: $R_SENSOR_SWEEP"
 echo "cache  : $CACHE_DIR"
 
-uv run python scripts/sparse_sensor_sweep.py \
+uv run python experiments/april_wake/scripts/sparse_sensor_sweep.py \
     --run "$RUN" \
     --tag "$TAG" \
     --stages $STAGES \

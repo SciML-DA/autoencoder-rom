@@ -7,10 +7,10 @@ Convergence study for sparse-sensor reconstruction. Sweeps the axes that matter
 one at a time, holding the rest at a baseline, and writes a resumable CSV plus
 the convergence plots and a video pack.
 
-    python scripts/sparse_sensor_sweep.py --quick            # ~3 min, smoke test
-    python scripts/sparse_sensor_sweep.py                    # the real thing
-    python scripts/sparse_sensor_sweep.py --stages A B       # just those two
-    qsub hpc/sparse_sensor_sweep.pbs                         # on cx3
+    python experiments/april_wake/scripts/sparse_sensor_sweep.py --quick            # ~3 min, smoke test
+    python experiments/april_wake/scripts/sparse_sensor_sweep.py                    # the real thing
+    python experiments/april_wake/scripts/sparse_sensor_sweep.py --stages A B       # just those two
+    qsub experiments/april_wake/hpc/sparse_sensor_sweep.pbs                         # on cx3
 
 Why staged, and not one big grid
 --------------------------------
@@ -73,7 +73,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,
@@ -1252,7 +1255,7 @@ def _write_videos(videos, Q, te, unflat, case0, out, args):
     print(f"  wrote {path}  ({os.path.getsize(path) / 1e6:.0f} MB, {n} frames)")
 
     if args.no_render:
-        print("  --no-render: sync the pack and use scripts/make_reconstruction_video.py")
+        print("  --no-render: sync the pack and use experiments/april_wake/scripts/make_reconstruction_video.py")
         return
     for k, info in meta["labels"].items():
         p = rp.animate_reconstruction(

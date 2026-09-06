@@ -13,8 +13,8 @@
 
 # Held-out-yaw generalisation, as a PBS array job: one held-out run per index.
 #
-#   qsub hpc/sparse_sensors_crossyaw.pbs
-#   qsub -J 0-4 -v N=3000 hpc/sparse_sensors_crossyaw.pbs      # subsample first
+#   qsub experiments/april_wake/hpc/sparse_sensors_crossyaw.pbs
+#   qsub -J 0-4 -v N=3000 experiments/april_wake/hpc/sparse_sensors_crossyaw.pbs      # subsample first
 #
 # This is the test that actually matters, and the reason five runs exist. An
 # in-time split measures whether the model generalises to *later* snapshots of
@@ -64,7 +64,7 @@ echo "holding out: $HELD"
 # it word-splits into separate arguments; keep each flag and value simple.
 EXTRA="${EXTRA:-}"
 
-uv run python scripts/sparse_sensor_study.py \
+uv run python experiments/april_wake/scripts/sparse_sensor_study.py \
     --runs "${RUNS[@]}" \
     --cross-yaw "$HELD" \
     --tag "xyaw_$HELD" \

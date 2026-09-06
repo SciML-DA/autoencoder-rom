@@ -24,7 +24,7 @@ hpc_init
 
 EXTRA="${EXTRA:-}"
 
-uv run python scripts/sparse_sensor_sweep.py \
+uv run python experiments/april_wake/scripts/sparse_sensor_sweep.py \
     --stages R \
     --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
     --n-delays "${N_DELAYS:-25}" \

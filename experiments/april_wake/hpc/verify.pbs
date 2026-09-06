@@ -10,7 +10,7 @@
 # study job -- it is thirty minutes that saves you from discovering a pairing or
 # transpose bug after an eight-hour GPU job.
 #
-#   qsub hpc/verify.pbs
+#   qsub experiments/april_wake/hpc/verify.pbs
 #
 # No GPU: everything here is small, and the CPU-only path is the one that has to
 # work anyway for the linear baselines.
@@ -34,4 +34,4 @@ VERIFY_SLOW=1 uv run python -m pytest tests/ -q
 
 echo
 echo "=== the real data on RDS ==="
-uv run python scripts/inspect_experiment.py
+uv run python experiments/april_wake/scripts/inspect_experiment.py

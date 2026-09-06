@@ -27,7 +27,11 @@ import tempfile
 import numpy as np
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO, "scripts")
+# the rig-specific entry points live with the experiment they belong to
+SCRIPTS = os.path.join(REPO, "experiments", "april_wake", "scripts")
+# the repo root, for `experiments` -- which lives outside src/ and so is
+# deliberately not part of the installed package
+sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "src"))
 
 from experiments.april_wake import case_reader as we  # noqa: E402

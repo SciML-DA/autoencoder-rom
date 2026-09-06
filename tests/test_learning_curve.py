@@ -22,8 +22,10 @@ from contextlib import redirect_stdout
 
 import numpy as np
 
+# the rig-specific entry points moved under the experiment they belong to
 sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "experiments", "april_wake", "scripts"))
 
 from convergence_diagnosis import _verdict_learning_curve  # noqa: E402
 

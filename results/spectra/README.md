@@ -1,6 +1,6 @@
 # spectra
 
-**From:** `qsub hpc/spectra.pbs` → `scripts/spectra.py`, one subfolder per run.
+**From:** `qsub experiments/april_wake/hpc/spectra.pbs` → `experiments/april_wake/scripts/spectra.py`, one subfolder per run.
 
 **Purpose:** the frequency-domain survey of the sparse-sensor problem — what the
 load cells carry, what the flow carries, and at which frequencies the two are
@@ -13,7 +13,7 @@ are uninformative at every frequency, versus sensors that are informative in a
 narrow band and blind everywhere else, whose signal the broadband average
 dilutes to nothing. Coherence tells them apart frequency by frequency.
 
-It also produces the PIV/force lag estimate that phase 2 of `hpc/run_study.sh`
+It also produces the PIV/force lag estimate that phase 2 of `experiments/april_wake/hpc/run_study.sh`
 has to be told (`FORCE_LAG`), from cross-correlation and cross-spectral group
 delay rather than from refitting an estimator.
 

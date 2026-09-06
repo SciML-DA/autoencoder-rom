@@ -20,10 +20,10 @@
 # the bands are independent, so five jobs run in parallel rather than one
 # chain of five.
 #
-#   qsub -v BAND=,TAG=fullband hpc/podlse_sweep.pbs
-#   qsub -v BAND=20,TAG=b20    hpc/podlse_sweep.pbs
+#   qsub -v BAND=,TAG=fullband experiments/april_wake/hpc/podlse_sweep.pbs
+#   qsub -v BAND=20,TAG=b20    experiments/april_wake/hpc/podlse_sweep.pbs
 #
-# See scripts/podlse_sweep.py for why an untuned baseline undermines the
+# See experiments/april_wake/scripts/podlse_sweep.py for why an untuned baseline undermines the
 # ceiling argument.
 
 set -euo pipefail
@@ -34,7 +34,7 @@ EXTRA="${EXTRA:-}"
 BAND_ARG=""
 [[ -n "${BAND:-}" ]] && BAND_ARG="--band-hz ${BAND}"
 
-uv run python scripts/podlse_sweep.py \
+uv run python experiments/april_wake/scripts/podlse_sweep.py \
     --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
     --tag "${TAG:-default}" \
     --max-hours "${MAX_HOURS:-3.5}" \

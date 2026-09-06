@@ -6,8 +6,8 @@ loss_curves.py
 Per-epoch training and validation loss for every sensor-branch model, in the
 style of `convergence_study.py`'s `loss_curves_latent*.png`.
 
-    qsub hpc/loss_curves.pbs
-    python scripts/loss_curves.py --tag noise_band --sensor-noise 0.1 --band-hz 40
+    qsub experiments/april_wake/hpc/loss_curves.pbs
+    python experiments/april_wake/scripts/loss_curves.py --tag noise_band --sensor-noise 0.1 --band-hz 40
 
 The sweeps report one score per fit and throw the trajectory away, which is
 enough to rank models and not enough to say why one lost. These are the curves:
@@ -46,7 +46,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,

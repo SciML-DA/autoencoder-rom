@@ -28,6 +28,9 @@ import numpy as np
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# the repo root, for `experiments` -- which lives outside src/ and so is
+# deliberately not part of the installed package
+sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, os.path.join(REPO, "tests"))
 

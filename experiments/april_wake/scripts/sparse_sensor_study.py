@@ -7,10 +7,10 @@ The full sparse-sensor reconstruction study: reconstruct the PIV velocity field
 around disc 2 from the twelve load-cell channels alone, with every method in the
 repo, on one contiguous held-out block, at matched latent dimension.
 
-    python scripts/sparse_sensor_study.py --quick             # ~2 min, sanity
-    python scripts/sparse_sensor_study.py                     # the real thing
-    python scripts/sparse_sensor_study.py --cross-yaw         # held-out yaw
-    python scripts/sparse_sensor_study.py --forecast          # + task 3
+    python experiments/april_wake/scripts/sparse_sensor_study.py --quick             # ~2 min, sanity
+    python experiments/april_wake/scripts/sparse_sensor_study.py                     # the real thing
+    python experiments/april_wake/scripts/sparse_sensor_study.py --cross-yaw         # held-out yaw
+    python experiments/april_wake/scripts/sparse_sensor_study.py --forecast          # + task 3
 
 What it runs, and why the grid is shaped this way
 -------------------------------------------------
@@ -71,7 +71,10 @@ matplotlib.use("Agg")  # cx3 compute nodes have no display
 
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,
@@ -522,7 +525,7 @@ def main() -> int:
     m.add_argument("--cv-folds", type=int, default=5)
     m.add_argument("--latents", nargs="+", default=["pod"], choices=["pod", "ae", "cae"])
     # nargs="*" so `--branches` on its own means "linear baselines only" --
-    # that is a real configuration (hpc/sensors.pbs), not a mistake
+    # that is a real configuration (experiments/april_wake/hpc/sensors.pbs), not a mistake
     m.add_argument("--branches", nargs="*", default=["linear", "mlp", "gru"], choices=["linear", "mlp", "cnn", "gru"])
     m.add_argument("--pod-method", default="randomized", choices=["svd", "snapshot", "randomized", "auto"])
     m.add_argument("--forecast", action="store_true", help="also run task 3")

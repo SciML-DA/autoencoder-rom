@@ -13,7 +13,7 @@
 # Run it on the cx3 login node. Exits non-zero if anything fails, so it can gate
 # a submission:
 #
-#     ./hpc/preflight.sh && qsub hpc/verify.pbs
+#     ./hpc/preflight.sh && qsub experiments/april_wake/hpc/verify.pbs
 
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -29,12 +29,18 @@ rule() { printf '\n== %s ==\n' "$1"; }
 # ── 1. the job scripts parse, and agree on how they set up ────────────────────
 
 rule "job scripts"
-for f in hpc/*.pbs; do
+# Jobs live in two places: hpc/ holds the ones that are not tied to a rig, and
+# each campaign keeps its own under experiments/<name>/hpc/. Both are checked
+# by the same rules -- a job script does not get laxer for living next to the
+# data it reads.
+JOBS=(hpc/*.pbs experiments/*/hpc/*.pbs)
+
+for f in "${JOBS[@]}"; do
     if bash -n "$f" 2>/dev/null; then ok "$(basename "$f") parses"
     else bad "$(basename "$f") is not valid bash"; bash -n "$f"; fi
 done
 
-for f in hpc/*.pbs; do
+for f in "${JOBS[@]}"; do
     grep -q 'source .*hpc/lib.sh' "$f" \
         && ok "$(basename "$f") uses hpc/lib.sh" \
         || bad "$(basename "$f") has its own setup block -- it will drift"
@@ -96,23 +102,22 @@ uv run python - <<'PY'
 import os, re, shlex, subprocess, sys
 repo = os.getcwd()
 bad = 0
-for job in sorted(os.listdir("hpc")):
-    if not job.endswith(".pbs"):
-        continue
+import glob
+for job in sorted(glob.glob("hpc/*.pbs") + glob.glob("experiments/*/hpc/*.pbs")):
     probe = ('uv() { printf "PYARGS:%s\\n" "${*:3}"; }\n'
              f'PBS_O_WORKDIR={shlex.quote(repo)} PBS_JOBID=preflight.0 '
              'PBS_JOBNAME=preflight NCPUS=2 PBS_ARRAY_INDEX=0\n'
-             f'source {shlex.quote(os.path.join(repo, "hpc", job))}\n')
+             f'source {shlex.quote(os.path.join(repo, job))}\n')
     p = subprocess.run(["bash", "-c", probe], capture_output=True, text=True,
                        cwd=repo, timeout=300)
     lines = [l[7:] for l in p.stdout.splitlines() if l.startswith("PYARGS:")]
     if not lines:
-        print(f"  \033[33mskip\033[0m  {job}: builds no python command")
+        print(f"  \033[33mskip\033[0m  {os.path.basename(job)}: builds no python command")
         continue
     argv = shlex.split(lines[-1])
     script = argv[0]
     if not os.path.exists(script):
-        print(f"  \033[31mFAIL\033[0m  {job}: {script} does not exist")
+        print(f"  \033[31mFAIL\033[0m  {os.path.basename(job)}: {script} does not exist")
         bad += 1
         continue
     helptext = subprocess.run([sys.executable, script, "--help"],
@@ -120,7 +125,7 @@ for job in sorted(os.listdir("hpc")):
     missing = [a for a in argv[1:]
                if a.startswith("--") and a not in helptext]
     if missing:
-        print(f"  \033[31mFAIL\033[0m  {job} -> {os.path.basename(script)}: "
+        print(f"  \033[31mFAIL\033[0m  {os.path.basename(job)} -> {os.path.basename(script)}: "
               f"unknown flag(s) {' '.join(missing)}")
         bad += 1
     else:
@@ -158,7 +163,7 @@ rule "summary"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 if [[ $fail -eq 0 ]]; then
     printf '\n  Clear to submit:\n'
-    printf '    qsub hpc/verify.pbs\n'
+    printf '    qsub experiments/april_wake/hpc/verify.pbs\n'
     exit 0
 fi
 printf '\n  Fix the above before submitting.\n'

@@ -1,7 +1,7 @@
 # spectra / 4p5d_10ms_yaw_0_0_0
 
-`scripts/spectra.py` on the zero-yaw run of the April wake experiment — the
-baseline case. Defaults from `hpc/spectra.pbs`: `--r-field 16`, `--nperseg 256`,
+`experiments/april_wake/scripts/spectra.py` on the zero-yaw run of the April wake experiment — the
+baseline case. Defaults from `experiments/april_wake/hpc/spectra.pbs`: `--r-field 16`, `--nperseg 256`,
 `--max-lag 80`, `--observed 0.8281`.
 
 `band_ceiling.png` is the one that decides what happens next: flat means the

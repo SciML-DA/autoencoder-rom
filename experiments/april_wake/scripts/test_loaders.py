@@ -6,9 +6,9 @@ test_loaders.py
 End-to-end smoke test: load the April experiment, fit POD-LSE, reconstruct the
 velocity field from the load cells alone, and animate the result.
 
-    python scripts/test_loaders.py                      # defaults
-    python scripts/test_loaders.py --n 2000 --r-field 40
-    python scripts/test_loaders.py --run 4p5d_10ms_yaw_30_15_0
+    python experiments/april_wake/scripts/test_loaders.py                      # defaults
+    python experiments/april_wake/scripts/test_loaders.py --n 2000 --r-field 40
+    python experiments/april_wake/scripts/test_loaders.py --run 4p5d_10ms_yaw_30_15_0
 
 Outputs into ``results/loaders/``:
 
@@ -35,7 +35,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.animation import FuncAnimation, PillowWriter  # noqa: E402
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/april_wake/scripts/<name>.py, so three levels
+# up is the repo root -- which is what makes `experiments` importable.
+# `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from experiments.april_wake.case_reader import (  # noqa: E402
     F_PIV_HZ,

@@ -9,7 +9,7 @@
 # Why the sweep plateaus at NMSE ~0.83. CPU only -- every check here is linear
 # algebra and a lag scan, and the GPU queue is not worth waiting for.
 #
-#   qsub hpc/diagnose.pbs
+#   qsub experiments/april_wake/hpc/diagnose.pbs
 #   tail -f logs/diagnose.*.live
 #
 # Walltime is 3 h, not 1: --lag-step 1 --max-lag 80 is 161 PODLSE refits, and
@@ -29,7 +29,7 @@ hpc_init
 
 EXTRA="${EXTRA:-}"
 
-uv run python scripts/diagnose_sensors.py \
+uv run python experiments/april_wake/scripts/diagnose_sensors.py \
     --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
     --r-field "${R_FIELD:-64}" \
     --n-delays "${N_DELAYS:-25}" \

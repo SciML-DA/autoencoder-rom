@@ -6,9 +6,9 @@ make_reconstruction_video.py
 Render the reconstruction video from a ``video_pack.npz`` written by
 ``sparse_sensor_sweep.py`` or ``sparse_sensor_study.py``.
 
-    python scripts/make_reconstruction_video.py results/sparse_sweep/main/video_pack.npz
-    python scripts/make_reconstruction_video.py <pack> --side-by-side
-    python scripts/make_reconstruction_video.py <pack> --component v --fps 30 --format gif
+    python experiments/april_wake/scripts/make_reconstruction_video.py results/sparse_sweep/main/video_pack.npz
+    python experiments/april_wake/scripts/make_reconstruction_video.py <pack> --side-by-side
+    python experiments/april_wake/scripts/make_reconstruction_video.py <pack> --component v --fps 30 --format gif
 
 Why this is a separate script
 -----------------------------
@@ -33,7 +33,7 @@ What is in a pack
 ``x``, ``y``   grid coordinates in mm
 ``meta``       JSON: per-prediction label and NMSE, the timestep, the run
 
-    python scripts/make_reconstruction_video.py <pack> --list
+    python experiments/april_wake/scripts/make_reconstruction_video.py <pack> --list
 """
 
 from __future__ import annotations
