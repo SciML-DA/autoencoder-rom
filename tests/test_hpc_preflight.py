@@ -33,7 +33,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # sparse_sensors_crossyaw.pbs needs several runs, so both are covered elsewhere.
 JOBS = ["lowrank.pbs", "sensors.pbs", "diagnose.pbs", "sparse_sensors.pbs",
         "sparse_sensor_sweep.pbs", "spectra.pbs",
-        "convergence_diagnosis.pbs"]
+        "convergence_diagnosis.pbs", "loss_curves.pbs", "hyper_search.pbs"]
 
 # Overrides that make a cluster-sized job finish in seconds. Applied last, so
 # they win over whatever the job script sets.
@@ -48,6 +48,14 @@ SMALL = {
                             "--skip", "spectrum", "leak", "lag"],
     "convergence_diagnosis.py": ["--quick", "--n", "300", "--device", "cpu",
                                 "--branches", "linear", "--latents", "pod"],
+    "loss_curves.py": ["--n", "300", "--r-field", "4", "--n-delays", "5",
+                       "--epochs", "10", "--patience", "5", "--ae-epochs", "10",
+                       "--branches", "linear", "--latents", "pod",
+                       "--device", "cpu"],
+    # needs a record long enough to survive make_split's warm-up plus
+    # hyper_search's own validation guard band
+    "hyper_search.py": ["--n", "900", "--delays", "25", "--stages", "screen",
+                        "--limit", "2", "--device", "cpu"],
     "spectra.py": ["--n", "300", "--r-field", "4", "--n-modes-coh", "2",
                    "--nperseg", "64", "--nperseg-force", "512",
                    "--max-lag", "20"],

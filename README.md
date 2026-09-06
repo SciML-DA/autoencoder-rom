@@ -12,8 +12,7 @@ forecaster, so a POD or autoencoder latent space can be rolled forward in time.
 On top of that sits **reconstruction from sparse sensors**: recovering a full
 PIV velocity field from twelve load-cell channels, by extended POD and linear
 stochastic estimation (the baseline) or by a two-branch autoencoder with a
-learned sensor map (the thing that has to beat it). See
-[docs/sparse_sensors/](docs/sparse_sensors/).
+learned sensor map (the thing that has to beat it).
 
 ---
 
@@ -139,7 +138,6 @@ p.score(X)        # mean squared reconstruction error
 ```
 .
 ├── data/                        # Snapshot files (untracked)
-├── docs/                        # ESN walkthroughs, sparse-sensor briefing
 ├── hpc/                         # PBS job scripts and cluster setup
 │   ├── lib.sh                   # threads, live log, env -- sourced by every job
 │   ├── preflight.sh             # run before every qsub

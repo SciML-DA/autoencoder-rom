@@ -1,7 +1,29 @@
 {
   "venvPath": ".",
   "venv": ".venv",
-  "extraPaths": ["src"],
-  "include": ["src", "scripts", "testing", "test_autoencoders.py"],
-  "exclude": ["**/__pycache__", ".venv", "data", "results"]
+  "extraPaths": [
+    "src"
+  ],
+  "include": [
+    "src",
+    "scripts",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "data",
+    "results"
+  ],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.13",
+  "reportMissingParameterType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownLambdaType": "none",
+  "reportImplicitStringConcatenation": "none",
+  "reportAny": "none",
+  "reportExplicitAny": "none"
 }

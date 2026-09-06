@@ -1,9 +1,15 @@
 from __future__ import annotations
-import contextlib, io, os, sys, time
-from typing import Optional
+
+import contextlib
+import io
+import os
+import sys
+import time
 from pathlib import Path
-import numpy as np
+from typing import Optional
+
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -18,8 +24,7 @@ from datasets import (
     load_snapshots,
     prepare_split,
 )
-from models.data_driven.autoencoders import POD, AE, CAE, AEJax, CAEJax
-
+from models.data_driven.autoencoders import AE, CAE, POD, AEJax, CAEJax
 
 # ── dataset specs ──────────────────────────────────────────────────────────────
 # fixed hidden widths make the dense AE's parameter count essentially independent
@@ -79,12 +84,7 @@ STYLE = {
 # smaller, the loop breaks with decays left and min_lr is dead config. the old
 # 1e-3 -> 1e-6 needed 160 plateau epochs against a patience of 50
 def check_schedule(train: dict) -> int:
-    n_decays = int(
-        np.ceil(
-            np.log(train["min_lr"] / train["learning_rate"])
-            / np.log(train["lr_factor"])
-        )
-    )
+    n_decays = int(np.ceil(np.log(train["min_lr"] / train["learning_rate"]) / np.log(train["lr_factor"])))
     needed = n_decays * (train["lr_patience"] + 1)
     if train["patience"] < needed:
         raise ValueError(
@@ -153,9 +153,7 @@ def build_models(
                 **train,
             ),
         ),
-        "AEJax": AEJax(
-            n_latent=n_latent, hidden=hidden, activation="tanh", **jax_train
-        ),
+        "AEJax": AEJax(n_latent=n_latent, hidden=hidden, activation="tanh", **jax_train),
         "CAE": CAE(
             n_latent=n_latent,
             **_torch_kwargs(
@@ -166,16 +164,14 @@ def build_models(
                 **train,
             ),
         ),
-        "CAEJax": CAEJax(
-            n_latent=n_latent, activation="tanh", **spec["conv"], **jax_train
-        ),
+        "CAEJax": CAEJax(n_latent=n_latent, activation="tanh", **spec["conv"], **jax_train),
     }
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 @contextlib.contextmanager
 def quiet(enabled: bool = True):
-    """Swallow the per-epoch prints inside models.data_driven.autoencoders.ae_jax.fit_params."""
+    """Swallow the per-epoch prints inside models.data_driven.autoencoders' jax fit_params."""
     if not enabled:
         yield
         return
@@ -252,17 +248,11 @@ def save_loss_curves(rows: list[dict], outpath: Path, title: str) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
     for r in rows:
         st = STYLE[r["model"]]
-        axes[0].plot(
-            r["history_train"], color=st["color"], ls=st["ls"], label=r["model"]
-        )
+        axes[0].plot(r["history_train"], color=st["color"], ls=st["ls"], label=r["model"])
         if len(r["history_val"]):
-            axes[1].plot(
-                r["history_val"], color=st["color"], ls=st["ls"], label=r["model"]
-            )
+            axes[1].plot(r["history_val"], color=st["color"], ls=st["ls"], label=r["model"])
             if np.isfinite(r["best_epoch"]):
-                axes[1].axvline(
-                    r["best_epoch"] - 1, color=st["color"], ls=":", lw=0.8, alpha=0.6
-                )
+                axes[1].axvline(r["best_epoch"] - 1, color=st["color"], ls=":", lw=0.8, alpha=0.6)
 
     for ax, lab in zip(axes, ("training loss", "validation loss")):
         ax.set_yscale("log")
@@ -315,9 +305,7 @@ def save_summary_plot(
             marker=st["marker"],
         )
         if np.any(stds > 0):
-            plt.fill_between(
-                latents, means - stds, means + stds, color=st["color"], alpha=0.2
-            )
+            plt.fill_between(latents, means - stds, means + stds, color=st["color"], alpha=0.2)
 
     _draw_floors(floors, latents)
     plt.xscale("log", base=2)
@@ -332,9 +320,7 @@ def save_summary_plot(
     plt.close()
 
 
-def save_train_vs_test(
-    results: list[dict], outpath: Path, title: str, floors: tuple = ()
-) -> None:
+def save_train_vs_test(results: list[dict], outpath: Path, title: str, floors: tuple = ()) -> None:
     """Both errors on one axis: the vertical gap between a pair is the overfit."""
     plt.figure(figsize=(7, 4.5))
     latents: list[int] = []
@@ -474,9 +460,7 @@ def run_convergence_study(
         print(f"\n=== latent={n_latent} ===")
         rows_here = []
         for seed in seeds:
-            built = build_models(
-                n_latent, seed, spec, device, val_fraction, n_epochs=epochs
-            )
+            built = build_models(n_latent, seed, spec, device, val_fraction, n_epochs=epochs)
             for name, model in built.items():
                 if models is not None and name not in models:
                     continue
@@ -498,9 +482,7 @@ def run_convergence_study(
                         "seed": int(seed),
                         "n_latent": int(n_latent),
                         # hyphenated so it survives a comma-separated file
-                        "hidden": "-".join(
-                            str(h) for h in resolve_hidden(spec, n_latent)
-                        ),
+                        "hidden": "-".join(str(h) for h in resolve_hidden(spec, n_latent)),
                         "n_x": n_x,
                         **meta,
                     }

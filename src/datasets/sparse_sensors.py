@@ -8,13 +8,14 @@ so the loading, masking and splitting conventions are defined once.
 from __future__ import annotations
 
 import numpy as np
+from scipy import signal
 
 from tools.epod import split_train_test
 
 from .wake_experiment import RUNS, build_case, concat_cases
 
-__all__ = ["add_data_args", "probe_points", "apply_force_lag", "load_data",
-           "make_split"]
+__all__ = ["add_data_args", "probe_points", "apply_force_lag", "band_limit",
+           "load_data", "make_split"]
 
 
 def add_data_args(parser) -> None:
@@ -57,6 +58,13 @@ def add_data_args(parser) -> None:
                    help="how kept points' gaps are filled. 'zero' reproduces "
                         "the notebook's nan_to_num; 'interp' is better, because "
                         "a zero is a measured value to an SVD and a gap is not.")
+    d.add_argument("--band-hz", type=float, nargs="+", default=None, metavar="HZ",
+                   help="restrict the FIELD TARGET to a frequency band: one "
+                        "value low-passes, two band-pass. The coherence puts "
+                        "the sensors' informative band at ~6-37 Hz, and "
+                        "variance outside it is label noise the loss cannot "
+                        "explain. Changes the claim, so the sweep reports the "
+                        "full-band score of the same prediction alongside.")
     d.add_argument("--force-lag", type=int, default=0, metavar="N",
                    help="re-time the force record by N PIV samples against the "
                         "field before embedding. Negative N pairs each frame "
@@ -151,6 +159,88 @@ def apply_force_lag(S, lag: int, run_id=None):
     print(f"  force lag: {lag:+d} PIV samples "
           f"({1e3 * lag / 250.0:+.1f} ms, {lag * 10:+d} force samples); "
           f"{abs(lag)} frames edge-replicated at the {side} of each run")
+    return out
+
+
+def band_limit(Q, band, fs: float = 250.0, run_id=None, order: int = 4):
+    """Restricts the field to a frequency band, in time, with zero phase shift.
+
+    The coherence measured the sensors as informative over roughly 5.9-37.1 Hz
+    and blind outside it. Everything outside that band is variance the loss is
+    asked to explain and provably cannot, so it acts as label noise: it pulls
+    the fit around without ever being predictable. Removing it from the target
+    is denoising the labels using something that was measured rather than
+    guessed.
+
+    This changes what is being claimed. "The sensor-observable component of the
+    wake" is a defensible result and a different one from "the wake", so a
+    banded score has to be quoted with its band, and alongside the full-band
+    score of the same prediction -- which is why the sweep records both.
+
+    `filtfilt` runs the filter forwards and backwards, so there is no group
+    delay and no phase distortion; a one-pass filter would shift the target in
+    time and the estimator would spend its lags undoing that.
+
+    Filtering is done per run. A filter run across a seam would smear the end of
+    one flow into the start of another, and at the seam the two are unrelated.
+
+    `filtfilt` leaves a transient in roughly the last ten samples of each
+    segment -- odd-reflection padding pins the endpoint to the input value, so
+    stop-band content survives there. The interior is exact (measured 1e-6
+    attenuation at 100 Hz against a theoretical 1e-6 for this filter). Ten
+    samples is under 1% of a 1521-snapshot test block, but the test block does
+    end at a run's end, so a banded score carries that much contamination and a
+    tighter claim would need the margin excluded from the split. The padding is
+    left DC-preserving on purpose: the field carries a ~10 m/s mean, and
+    zero initial conditions would ramp the filter up from zero across the
+    transient instead of merely blurring it.
+
+    Args:
+        Q: Field snapshots, shape (N_x, N_t).
+        band: `[f_hi]` for a low-pass, or `[f_lo, f_hi]` for a band-pass, in Hz.
+        fs: Sampling rate of the snapshots.
+        run_id: Source run per column; filtering is applied within each.
+        order: Butterworth order.
+
+    Returns:
+        The filtered field, same shape as `Q`.
+
+    Raises:
+        ValueError: If `band` is not one or two positive frequencies below the
+            Nyquist, or if a run segment is too short for the filter.
+    """
+    Q = np.asarray(Q, np.float64)
+    band = [float(b) for b in np.atleast_1d(band)]
+    nyq = fs / 2.0
+    if len(band) not in (1, 2) or any(b <= 0 or b >= nyq for b in band):
+        raise ValueError(
+            f"band must be one or two frequencies in (0, {nyq}), got {band}"
+        )
+    if len(band) == 2 and band[0] >= band[1]:
+        raise ValueError(f"band must be increasing, got {band}")
+
+    if len(band) == 1:
+        sos = signal.butter(order, band[0] / nyq, btype="low", output="sos")
+        what = f"low-pass {band[0]:g} Hz"
+    else:
+        sos = signal.butter(order, [band[0] / nyq, band[1] / nyq],
+                            btype="band", output="sos")
+        what = f"band-pass {band[0]:g}-{band[1]:g} Hz"
+
+    out = np.empty_like(Q)
+    segs = ([np.arange(Q.shape[1])] if run_id is None
+            else [np.flatnonzero(run_id == k) for k in np.unique(run_id)])
+    for idx in segs:
+        blk = Q[:, idx]
+        if blk.shape[1] <= 3 * order * 3:
+            raise ValueError(
+                f"run segment of {blk.shape[1]} snapshots is too short to filter"
+            )
+        out[:, idx] = signal.sosfiltfilt(sos, blk, axis=1)
+
+    kept = float(np.var(out)) / max(float(np.var(Q)), 1e-30)
+    print(f"  band: {what} (zero-phase, order {order}); "
+          f"{100 * kept:.1f}% of the field variance kept")
     return out
 
 

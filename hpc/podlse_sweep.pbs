@@ -1,0 +1,46 @@
+#!/bin/bash
+#PBS -N podlse
+# CPU only, deliberately. PODLSE is dense NumPy end to end -- no torch, no GPU
+# -- so asking for ngpus=1 would queue behind the network jobs for hardware it
+# would never touch. The CPU queues on cx3 are an order of magnitude less
+# contended than v1_gpu72.
+# Sized down deliberately. The field is 31258 x 6085 float64 (~1.5 GB) and the
+# delay-embedded sensor record is tiny beside it, so 64 GB was never needed; a
+# randomized POD at r <= 128 does not saturate 8 cores either. PBS was refusing
+# on ncpus with a ~2 h estimated start -- a smaller ask schedules far sooner and
+# the fits are seconds either way.
+#PBS -l select=1:ncpus=4:mem=32gb
+#PBS -l walltime=04:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# Tunes the linear reference that hyper_search scores every network against.
+# One band per job -- the target has to be rebuilt when band_hz changes, and
+# the bands are independent, so five jobs run in parallel rather than one
+# chain of five.
+#
+#   qsub -v BAND=,TAG=fullband hpc/podlse_sweep.pbs
+#   qsub -v BAND=20,TAG=b20    hpc/podlse_sweep.pbs
+#
+# See scripts/podlse_sweep.py for why an untuned baseline undermines the
+# ceiling argument.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init 4
+
+EXTRA="${EXTRA:-}"
+BAND_ARG=""
+[[ -n "${BAND:-}" ]] && BAND_ARG="--band-hz ${BAND}"
+
+uv run python scripts/podlse_sweep.py \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --tag "${TAG:-default}" \
+    --max-hours "${MAX_HOURS:-3.5}" \
+    ${BAND_ARG} \
+    --out results/podlse_sweep \
+    $EXTRA "$@"
+
+echo
+echo "done. results in results/podlse_sweep/${TAG:-default}/"

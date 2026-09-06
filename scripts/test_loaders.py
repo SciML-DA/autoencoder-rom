@@ -74,8 +74,7 @@ def load_case(run: str, n_snapshots: int, method: str = "block"):
     # modelling choice, not a no-op: those points then read as "zero velocity"
     # rather than "no data", and POD will happily spend modes describing the
     # hole. It is defensible here only because the invalid fraction is ~0.7%
-    # and the mean is subtracted before the decomposition. See the note in
-    # docs/sparse_sensors/pod_lse_explained.md.
+    # and the mean is subtracted before the decomposition.
     n_bad = int(np.isnan(X).sum())
     Q = np.nan_to_num(X.reshape(2, n_t, n_x * n_y)).transpose(0, 2, 1)
     Q = np.concatenate([Q[0], Q[1]], axis=0)  # (2*Nx*Ny, Nt)
@@ -239,7 +238,7 @@ def main():
     # Contiguous split with a guard band. A random split leaks badly here: at
     # 250 Hz consecutive snapshots are nearly identical, so a randomly held-out
     # frame has near-copies of itself in the training set and the score is
-    # meaningless. See docs/sparse_sensors/pod_lse_explained.md.
+    # meaningless.
     tr, te = split_train_test(Q.shape[1], test_fraction=0.25, gap=args.gap)
     print(f"\nsplit: train {tr[0]}..{tr[-1]} ({len(tr)}), "
           f"test {te[0]}..{te[-1]} ({len(te)}), gap {args.gap}")

@@ -73,7 +73,12 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.sparse_sensors import add_data_args, load_data, make_split  # noqa: E402
+from datasets.sparse_sensors import (  # noqa: E402
+    add_data_args,
+    band_limit,
+    load_data,
+    make_split,
+)
 from datasets.wake_experiment import (  # noqa: E402
     F_PIV_HZ,
     RUNS,
@@ -117,6 +122,10 @@ CSV_FIELDS = [
     # single-run job. This is the column to compare against a single-run
     # headline; `nmse_test` pooled over runs is not comparable with one.
     "nmse_by_run",
+    # See sparse_sensor_sweep.py: with --band-hz, nmse_test scores the banded
+    # target the model was fitted to and this scores the same prediction against
+    # the unfiltered field. Quoting only the first lets banding flatter itself.
+    "nmse_fullband",
     "floor_test", "fit_seconds", "seed", "n_train", "n_test",
 ]
 
@@ -158,7 +167,7 @@ def rule(title: str) -> None:
 
 
 def run_linear(Q, S, tr, te, args, Psi, q_mean, results, per_snap, preds,
-               run_id=None, cases=None):
+               run_id=None, cases=None, Q_full=None):
     """POD-LSE and extended POD, at each delay length."""
     floor_te = projection_floor(Q[:, te], Psi, q_mean)
 
@@ -205,6 +214,8 @@ def run_linear(Q, S, tr, te, args, Psi, q_mean, results, per_snap, preds,
                                          pred - pred.mean(1, keepdims=True)),
                 nmse_by_run=(nmse_by_run(Q, pred, te, run_id, cases)
                              if run_id is not None else ""),
+                nmse_fullband=(nmse(Q_full[:, te], pred)
+                               if Q_full is not None else float("nan")),
                 floor_test=floor_te, fit_seconds=dt, label=label,
             ))
             per_snap[label] = nmse_per_snapshot(Q[:, te], pred)
@@ -259,7 +270,7 @@ def build_latents(Q, tr, args, case0, unflat):
 
 
 def run_branched(Q, S, tr, te, args, latents, results, per_snap, preds, floor_te,
-                 run_id=None, cases=None):
+                 run_id=None, cases=None, Q_full=None):
     """The two-branch models: every (latent, branch, delay) combination asked for."""
     for lname, (lat, Psi, _, q_mean) in latents.items():
         # each latent space has its own floor -- an AE bottleneck of the same
@@ -290,6 +301,8 @@ def run_branched(Q, S, tr, te, args, latents, results, per_snap, preds, floor_te
                     nmse_train=m.score(Q, S, tr), nmse_test=nmse(Q[:, te], pred),
                     nmse_by_run=(nmse_by_run(Q, pred, te, run_id, cases)
                                  if run_id is not None else ""),
+                    nmse_fullband=(nmse(Q_full[:, te], pred)
+                                   if Q_full is not None else float("nan")),
                     nmse_latent=m.latent_score(Q, S, te), floor_test=floor,
                     fit_seconds=dt, label=label,
                 ))
@@ -470,6 +483,10 @@ def main() -> int:
 
     rule("1. data")
     Q, S, unflat, case0, run_id, cases = load_data(args)
+    Q_full = None
+    if args.band_hz:
+        Q_full = Q
+        Q = band_limit(Q, args.band_hz, 250.0, run_id)
     tr, te, held = make_split(args, Q.shape[1], run_id, cases)
 
     rule("2. latent spaces")
@@ -480,11 +497,11 @@ def main() -> int:
     rule("3. linear baselines")
     Psi, Sigma, q_mean = _basis(latents, Q, tr, args)
     floor_te = run_linear(Q, S, tr, te, args, Psi, q_mean, results, per_snap,
-                          preds, run_id, cases)
+                          preds, run_id, cases, Q_full)
 
     rule("4. two-branch models")
     run_branched(Q, S, tr, te, args, latents, results, per_snap, preds, floor_te,
-                 run_id, cases)
+                 run_id, cases, Q_full)
 
     curves = {}
     if args.forecast:

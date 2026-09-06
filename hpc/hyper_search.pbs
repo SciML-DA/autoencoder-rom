@@ -1,0 +1,51 @@
+#!/bin/bash
+#PBS -N hyper
+# No gpu_type: cx3 has 7 L40S against 10 RTX6000, 2 A100 and 2 A40, so pinning
+# L40S asks for a third of the GPU nodes and PBS says so directly ("Placement
+# set is too small"). These fits are hundreds to thousands of parameters; the
+# only real constraint is fitting the snapshot matrix, which the 24 GB RTX6000
+# handles. Set GPU_TYPE=L40S in the qsub -v line to pin it back if needed.
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -l walltime=04:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# The staged hyperparameter search over the branched-AE architecture.
+#
+#   qsub -v STAGES=screen  hpc/hyper_search.pbs      # 273 configs
+#   qsub -v STAGES=pair    hpc/hyper_search.pbs      #  45
+#   qsub -v STAGES=random  hpc/hyper_search.pbs      # 400
+#   qsub -v STAGES=confirm hpc/hyper_search.pbs      # top 20, 5 seeds, test
+#
+# The search itself is defined in the CONFIG block of scripts/hyper_search.py,
+# not here and not on the command line: seventeen axes do not belong in a qsub
+# line, and a recorded design is reproducible where a shell history is not.
+#
+# Resumable and ordered smallest-model-first, so `tail -f` half way through is
+# already informative and a link killed at walltime loses one fit.
+#
+# MAX_HOURS is the script's own budget and must stay ~0.5h under the walltime
+# above: it stops between fits and writes its state, where PBS stops mid-fit and
+# does not. Change one and you must change the other, or every link gets hard
+# killed and loses the fit it was in the middle of.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init 4
+hpc_gpu
+
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/hyper_search.py \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --tag "${TAG:-default}" \
+    --stages ${STAGES:-screen} \
+    --max-hours "${MAX_HOURS:-3.5}" \
+    --random-seed "${RANDOM_SEED:-0}" \
+    --n-random "${N_RANDOM:-0}" \
+    --out results/hyper_search \
+    $EXTRA "$@"
+
+echo
+echo "done. results in results/hyper_search/${TAG:-default}/"

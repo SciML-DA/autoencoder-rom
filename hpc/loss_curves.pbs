@@ -1,0 +1,44 @@
+#!/bin/bash
+#PBS -N losscurves
+# No gpu_type, matching hyper_search.pbs: pinning L40S asks for 7 of cx3's 21
+# GPU nodes. These are the same small fits, so the widened pool costs nothing.
+# Note the constraint has not actually been exercised yet -- every job so far
+# landed on an L40S regardless -- so RTX6000 (24 GB) remains untested here.
+#PBS -l select=1:ncpus=8:mem=64gb:ngpus=1
+#PBS -l walltime=04:00:00
+#PBS -o logs/
+#PBS -e logs/
+#PBS -S /bin/bash
+#
+# Per-epoch training and validation loss for every sensor-branch model, in the
+# style of convergence_study.py's loss_curves_latent*.png.
+#
+#   qsub -v TAG=plain hpc/loss_curves.pbs
+#   qsub -v TAG=noise,EXTRA="--sensor-noise 0.1" hpc/loss_curves.pbs
+#   qsub -v TAG=band,EXTRA="--band-hz 40" hpc/loss_curves.pbs
+#   qsub -v TAG=noise_band,EXTRA="--band-hz 40 --sensor-noise 0.1" hpc/loss_curves.pbs
+#
+# One configuration per job -- this is deliberately not a sweep. The sweeps
+# report one score per fit and discard the trajectory, which is enough to rank
+# models and not enough to say why one lost.
+
+set -euo pipefail
+source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+hpc_init 4
+hpc_gpu
+
+EXTRA="${EXTRA:-}"
+
+uv run python scripts/loss_curves.py \
+    --run "${RUN:-4p5d_10ms_yaw_0_0_0}" \
+    --tag "${TAG:-default}" \
+    --r-field "${R_FIELD:-16}" \
+    --n-delays "${N_DELAYS:-25}" \
+    --epochs "${EPOCHS:-2000}" \
+    --patience "${PATIENCE:-200}" \
+    --lr "${LR:-3e-3}" \
+    --out results/loss_curves \
+    $EXTRA "$@"
+
+echo
+echo "done. results in results/loss_curves/${TAG:-default}/"

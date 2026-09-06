@@ -389,6 +389,42 @@ class BranchedAE:
             input for a latent forecaster.
         learning_rate: Adam step size.
         weight_decay: L2 penalty applied by Adam.
+        sensor_noise: Standard deviation of Gaussian noise added to the sensor
+            window at every training step, in units of the standardised channel
+            (the branch's input is already divided by each channel's training
+            standard deviation, so 0.1 is 10% of a channel's own variability).
+            Fresh noise every minibatch and every epoch; the validation split
+            and every prediction are left clean.
+
+            This is the regulariser the diagnosis asked for. The branched models
+            reach a training NMSE of ~0.50 against a test NMSE of ~0.94 -- they
+            have capacity to spare and not enough data to constrain it, which is
+            overfitting rather than the under-fitting the epoch sweep found for
+            the linear branch. For a linear model, input noise of variance s^2
+            is exactly equivalent to ridge with lambda = s^2 * n, so this puts
+            the nonlinear branches on the same footing as the ridge that the
+            closed-form estimator already gets, and does it in the one place
+            that generalises to a network.
+        track_sets: Optional `{name: (Q, S, idx)}`. After every `track_every`
+            epochs, the model is scored on each set in *field NMSE* and the
+            result appended to `track_history[name]` as `(epoch, nmse)`.
+
+            This is the overfitting diagnostic. `loss_history` and
+            `val_loss_history` are latent-space training objectives on a holdout
+            carved out of the training block; they answer "is the optimiser
+            still descending", not "is this model generalising". Passing the
+            held-out *test* block here scores the thing actually reported, in
+            the same units, on the same axes -- so a training curve that keeps
+            falling while the test curve flattens or turns up is visible rather
+            than inferred from two final numbers.
+
+            Scoring costs a full decode per set per evaluation, which is why
+            `track_every` and `track_max_cols` exist: raise the first and lower
+            the second on a long run.
+        track_every: Epochs between tracking evaluations.
+        track_max_cols: Snapshots sampled (evenly) from each tracked index set.
+            The curve is a diagnostic, not a reported score, so a few hundred
+            columns is ample and the full test block is wasteful per epoch.
         n_epochs: Maximum training epochs.
         batch_size: Minibatch size.
         val_fraction: Fraction of the training block held out for early
@@ -429,6 +465,7 @@ class BranchedAE:
     # optimisation
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
+    sensor_noise: float = 0.0
     n_epochs: int = 500
     batch_size: int = 128
     val_fraction: float = 0.2
@@ -448,8 +485,12 @@ class BranchedAE:
     s_mean: np.ndarray = field(default_factory=lambda: np.empty(0), repr=False)
     s_scale: np.ndarray = field(default_factory=lambda: np.empty(0), repr=False)
     z_scale: np.ndarray = field(default_factory=lambda: np.empty(0), repr=False)
+    track_sets: Optional[dict] = None
+    track_every: int = 1
+    track_max_cols: int = 400
     loss_history: list = field(default_factory=list, repr=False)
     val_loss_history: list = field(default_factory=list, repr=False)
+    track_history: dict = field(default_factory=dict, repr=False)
     fitted: bool = False
 
     # -- api -------------------------------------------------------------------
@@ -552,6 +593,7 @@ class BranchedAE:
 
         best, wait, best_state = float("inf"), 0, None
         self.loss_history, self.val_loss_history = [], []
+        self.track_history = {}
         n = Xtr.shape[0]
         for ep in range(self.n_epochs):
             self.G.train()
@@ -559,14 +601,33 @@ class BranchedAE:
             run = 0.0
             for s in range(0, n, self.batch_size):
                 sl = order[s : s + self.batch_size]
+                xb = Xtr[sl]
+                if self.sensor_noise > 0:
+                    # fresh every step: the network must not be able to average
+                    # a fixed perturbation away over epochs
+                    xb = xb + self.sensor_noise * torch.randn_like(xb)
                 opt.zero_grad(set_to_none=True)
-                loss = self._loss(Xtr[sl], Ztr[sl], None if Ftr is None else Ftr[sl])
+                loss = self._loss(xb, Ztr[sl], None if Ftr is None else Ftr[sl])
                 loss.backward()
                 if self.grad_clip:
                     torch.nn.utils.clip_grad_norm_(params, self.grad_clip)
                 opt.step()
                 run += loss.item() * len(sl)
             self.loss_history.append(run / n)
+
+            if self.track_sets and (ep % max(self.track_every, 1) == 0
+                                    or ep == self.n_epochs - 1):
+                self.G.eval()
+                self.fitted = True   # predict() checks this; restored below
+                with torch.no_grad():
+                    for name, (Qt, St, idx) in self.track_sets.items():
+                        idx = np.asarray(idx)
+                        if len(idx) > self.track_max_cols:
+                            idx = idx[np.linspace(0, len(idx) - 1,
+                                                  self.track_max_cols).astype(int)]
+                        e = nmse(np.asarray(Qt, np.float64)[:, idx],
+                                 self.predict(St, idx))
+                        self.track_history.setdefault(name, []).append((ep, e))
 
             if n_val:
                 self.G.eval()

@@ -75,7 +75,12 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from datasets.sparse_sensors import add_data_args, load_data, make_split  # noqa: E402
+from datasets.sparse_sensors import (  # noqa: E402
+    add_data_args,
+    band_limit,
+    load_data,
+    make_split,
+)
 from datasets.wake_experiment import F_PIV_HZ, RUNS  # noqa: E402
 from plotting import reconstruction as rp  # noqa: E402
 from tools.branched_ae import TorchLatent, default_device  # noqa: E402
@@ -100,6 +105,13 @@ CSV_FIELDS = [
     # a branched model is (1 - val_fraction) of the training block and so is
     # *smaller* than the closed-form estimators' -- a difference that reads as
     # a modelling gap if it is not recorded.
+    "sensor_noise", "weight_decay", "lr", "ensemble",
+    # With --band-hz, `nmse_test` scores against the BANDED target the model was
+    # fitted to and `nmse_fullband` scores the same prediction against the
+    # unfiltered field. Reporting only the first would let band-limiting flatter
+    # itself: shrinking the target shrinks the error without the reconstruction
+    # improving. The pair is the honest statement.
+    "nmse_fullband",
     "epochs_run", "train_loss", "val_loss", "stopped_early", "n_fit",
     "fit_seconds", "n_train", "n_test", "run", "tag",
 ]
@@ -113,7 +125,8 @@ CSV_FIELDS = [
 # separately as `r_sensor_used`. Keying on the resolved value instead looks
 # equivalent and silently breaks resumption, because None != 120.
 KEY = ("stage", "model", "latent", "branch", "r_field", "r_sensor", "ridge",
-       "n_delays", "channels", "seed")
+       "n_delays", "channels", "seed", "sensor_noise", "weight_decay", "lr",
+       "ensemble")
 
 
 def rule(t):
@@ -327,7 +340,7 @@ def backend_classes(backend: str):
     return tuple(getattr(tools, n) for n in BACKENDS[backend])
 
 
-def fit_one(cfg, Q, S, tr, te, latents, args, videos):
+def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
     """Fit and score one configuration. Returns a CSV row."""
     Lin, Ext, Branch, _ = backend_classes(args.backend)
     ch = _channels(S, cfg["channels"])
@@ -358,16 +371,45 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos):
                   delay_stride=args.delay_stride, hidden=tuple(args.hidden),
                   gru_hidden=args.gru_hidden, cnn_channels=tuple(args.cnn_channels),
                   lambda_field=args.lambda_field, latent_weight=args.latent_weight,
+                  sensor_noise=cfg["sensor_noise"],
+                  weight_decay=cfg["weight_decay"],
+                  lr_factor=args.lr_factor, lr_patience=args.lr_patience,
                   n_epochs=args.epochs, batch_size=args.batch,
-                  learning_rate=args.lr, patience=args.patience, seed=cfg["seed"])
+                  learning_rate=cfg["lr"], patience=args.patience,
+                  seed=cfg["seed"])
         if args.backend == "torch":
             kw["device"] = args.device  # jax picks its device from XLA
-        m = Branch(lat, **kw).fit(Q, S[ch], tr)
-        pred = m.predict(S[ch], te)
-        train_err = m.score(Q, S[ch], tr)
-        lat_err = m.latent_score(Q, S[ch], te)
+        n_ens = int(cfg.get("ensemble", 1) or 1)
+        if n_ens == 1:
+            m = Branch(lat, **kw).fit(Q, S[ch], tr)
+            pred = m.predict(S[ch], te)
+            train_err = m.score(Q, S[ch], tr)
+            lat_err = m.latent_score(Q, S[ch], te)
+        else:
+            # Average the *predictions*, not the weights. Two networks that
+            # reach equally good but different minima have no meaningful
+            # average in parameter space -- the mean of their weights is
+            # generally worse than either -- while the mean of their outputs
+            # is at least as good as the average member and usually better,
+            # because their errors are partly independent.
+            #
+            # This is variance reduction and nothing else: it cannot represent
+            # anything a single member could not. A gain here measures
+            # run-to-run spread, so it should be read next to stage D.
+            preds, trs, lats = [], [], []
+            for j in range(n_ens):
+                kw_j = dict(kw, seed=cfg["seed"] * 1000 + j)
+                mj = Branch(lat, **kw_j).fit(Q, S[ch], tr)
+                preds.append(mj.predict(S[ch], te))
+                trs.append(mj.score(Q, S[ch], tr))
+                lats.append(mj.latent_score(Q, S[ch], te))
+                if j == 0:
+                    m = mj
+            pred = np.mean(preds, axis=0)
+            train_err = float(np.mean(trs))
+            lat_err = float(np.mean(lats))
         floor = nmse(Q[:, te], lat.decode(lat.encode(Q[:, te])))
-        n_par = m.n_params
+        n_par = m.n_params * n_ens
         r_s_out = -1
 
     # training diagnostics; the closed-form estimators have no epochs and see
@@ -381,6 +423,8 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos):
         n_fit = int(round(len(tr) * (1.0 - float(getattr(m, "val_fraction", 0.0)))))
 
     test_err = nmse(Q[:, te], pred)
+    full_err = (nmse(Q_full[:, te], pred) if Q_full is not None
+                else float("nan"))
     # cosine and the energy ratio alongside NMSE: together they say *why* an
     # NMSE is what it is. The reference notebook reports cosine only, so this is
     # also what makes these numbers comparable with it.
@@ -390,7 +434,7 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos):
                          pred - pred.mean(1, keepdims=True))
     row = dict(cfg, r_sensor_used=r_s_out, n_params=n_par, nmse_train=train_err,
                nmse_test=test_err, nmse_latent=lat_err, cos_test=cos_te,
-               energy_test=en_te, floor_test=floor,
+               energy_test=en_te, nmse_fullband=full_err, floor_test=floor,
                epochs_run=n_ep, train_loss=(hist[-1] if hist else float("nan")),
                val_loss=(vhist[-1] if vhist else float("nan")),
                stopped_early=int(stopped), n_fit=n_fit,
@@ -496,7 +540,9 @@ class VideoPack:
 def base_cfg(args, **kw):
     cfg = dict(stage="", model="branched", latent="pod", branch="mlp",
                r_field=args.r_field, r_sensor=args.r_sensor, ridge=args.ridge,
-               n_delays=args.n_delays, channels="all", seed=args.seed)
+               n_delays=args.n_delays, channels="all", seed=args.seed,
+               sensor_noise=args.sensor_noise, weight_decay=args.weight_decay,
+               lr=args.lr, ensemble=args.ensemble)
     cfg.update(kw)
     return cfg
 
@@ -552,6 +598,79 @@ def stage_D(args):
     return out
 
 
+def stage_N(args):
+    """Input-noise regularisation, at fixed latent size and window.
+
+    The convergence diagnosis found the branched models at a training NMSE of
+    ~0.50 against a test NMSE of ~0.94: capacity to spare, not enough data to
+    constrain it. That is overfitting, and it is the opposite of the
+    under-fitting the same diagnosis found for the *linear* branch, so the fix
+    is a regulariser rather than a bigger budget.
+
+    Gaussian noise on the sensor window is the natural one here. For a linear
+    model, input noise of variance s^2 is exactly equivalent to ridge with
+    lambda = s^2 * n -- so this gives the networks the same regularisation the
+    closed-form estimator already gets from its ridge, by a route that
+    generalises to a nonlinear branch. It costs nothing at prediction time.
+
+    The closed-form rows are included at every noise level even though noise
+    does not touch them: they are a flat reference line across the plot, and a
+    stage whose reference moves is a stage with a bug.
+    """
+    out = []
+    for sd in args.noise_sweep:
+        out.append(base_cfg(args, stage="N", model="podlse", latent="pod",
+                            branch="closed-form", sensor_noise=sd))
+        for lk in args.latents:
+            for br in args.branches:
+                out.append(base_cfg(args, stage="N", model="branched", latent=lk,
+                                    branch=br, sensor_noise=sd))
+    return out
+
+
+def stage_W(args):
+    """Adam weight decay, at fixed latent size and window."""
+    out = []
+    for wd in args.wd_sweep:
+        out.append(base_cfg(args, stage="W", model="podlse", latent="pod",
+                            branch="closed-form", weight_decay=wd))
+        for lk in args.latents:
+            for br in args.branches:
+                out.append(base_cfg(args, stage="W", model="branched", latent=lk,
+                                    branch=br, weight_decay=wd))
+    return out
+
+
+def stage_L(args):
+    """Learning rate, with the plateau schedule left on.
+
+    The convergence diagnosis found the optimum pinned at the top of its grid
+    (1e-2) on the linear branch, which is a grid that was too narrow rather
+    than an answer. This sweeps it per architecture, because a rate that suits
+    a linear map is not obviously the rate that suits a GRU.
+    """
+    out = []
+    for lr in args.lr_sweep:
+        out.append(base_cfg(args, stage="L", model="podlse", latent="pod",
+                            branch="closed-form", lr=lr))
+        for lk in args.latents:
+            for br in args.branches:
+                out.append(base_cfg(args, stage="L", model="branched", latent=lk,
+                                    branch=br, lr=lr))
+    return out
+
+
+def stage_E(args):
+    """Seed ensembling: average the predictions of N independently fitted models."""
+    out = []
+    for n in args.ensemble_sweep:
+        for lk in args.latents:
+            for br in args.branches:
+                out.append(base_cfg(args, stage="E", model="branched", latent=lk,
+                                    branch=br, ensemble=n))
+    return out
+
+
 def stage_R(args):
     """
     Low-rank tuning, at the ranks the sensors actually resolve.
@@ -576,8 +695,12 @@ def stage_R(args):
     return out
 
 
-STAGES = {"A": stage_A, "B": stage_B, "C": stage_C, "D": stage_D, "R": stage_R}
+STAGES = {"A": stage_A, "B": stage_B, "C": stage_C, "D": stage_D,
+          "N": stage_N, "W": stage_W, "L": stage_L, "E": stage_E, "R": stage_R}
 STAGE_NAME = {"A": "latent-size convergence", "B": "window-length convergence",
+              "N": "input-noise regularisation",
+              "W": "weight decay", "L": "learning rate",
+              "E": "seed ensembling",
               "C": "sensor ablation", "D": "seed spread",
               "R": "low-rank tuning"}
 
@@ -689,6 +812,24 @@ def main() -> int:
                    default=["all", "disc2", "disc3", "forces", "moments"],
                    help="stage C: channel subsets")
     s.add_argument("--n-seeds", type=int, default=5, help="stage D")
+    s.add_argument("--wd-sweep", type=float, nargs="+",
+                   default=[0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2],
+                   help="stage W: Adam weight decay")
+    s.add_argument("--lr-sweep", type=float, nargs="+",
+                   default=[3e-4, 1e-3, 3e-3, 1e-2],
+                   help="stage L: learning rate, with the plateau schedule on")
+    s.add_argument("--ensemble", type=int, default=1,
+                   help="stage E: average the predictions of this many seeds. "
+                        "Variance reduction only -- it changes nothing about "
+                        "what a single model can represent, so a gain here is "
+                        "a statement about run-to-run spread, not capacity.")
+    s.add_argument("--ensemble-sweep", type=int, nargs="+",
+                   default=[1, 2, 3, 5, 8],
+                   help="stage E: ensemble sizes")
+    s.add_argument("--noise-sweep", type=float, nargs="+",
+                   default=[0.0, 0.05, 0.1, 0.25, 0.5, 1.0],
+                   help="stage N: sensor-noise standard deviations, in units of "
+                        "the standardised channel")
     s.add_argument("--rank-sweep", type=int, nargs="+", default=[2, 3, 4, 6, 8],
                    help="stage R: r_field values, at the observable ranks")
     s.add_argument("--r-sensor-sweep", type=int, nargs="+",
@@ -712,6 +853,16 @@ def main() -> int:
     b.add_argument("--n-delays", type=int, default=25)
     b.add_argument("--delay-stride", type=int, default=1)
     b.add_argument("--ridge", type=float, default=1e-4)
+    b.add_argument("--weight-decay", type=float, default=0.0,
+                   help="L2 penalty in Adam. Held fixed outside stage W.")
+    b.add_argument("--lr-factor", type=float, default=0.5,
+                   help="ReduceLROnPlateau decay factor; 1.0 disables the "
+                        "schedule and trains at a fixed rate")
+    b.add_argument("--lr-patience", type=int, default=10,
+                   help="plateau epochs before the learning rate decays")
+    b.add_argument("--sensor-noise", type=float, default=0.0,
+                   help="Gaussian noise on the sensor window during training, "
+                        "held fixed outside stage N")
     b.add_argument("--backend", default="torch", choices=["torch", "jax"],
                    help="torch is the default; jax runs the decompositions on "
                         "device and supports only --latents pod")
@@ -774,6 +925,13 @@ def main() -> int:
 
     rule("1. data")
     Q, S, unflat, case0, run_id, cases = load_data(args)
+    # Keep the unfiltered field so every row can be scored both ways. The POD
+    # basis, the projection floors and the fits all use the banded target; only
+    # `nmse_fullband` looks at the original.
+    Q_full = None
+    if args.band_hz:
+        Q_full = Q
+        Q = band_limit(Q, args.band_hz, 250.0, run_id)
     args.delays = args.delays_sweep + [args.n_delays]  # make_split needs the longest
     tr, te = make_split(args, Q.shape[1], run_id, cases)[:2]
 
@@ -821,7 +979,7 @@ def main() -> int:
                 continue
             rule(f"stage {st} -- {STAGE_NAME[st]}  ({len(batch)} fits)")
             for cfg in batch:
-                row = fit_one(cfg, Q, S, tr, te, latents, args, videos)
+                row = fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full)
                 rows.append(row)
                 w.writerow(row)
                 fh.flush()  # a walltime kill then costs one row, not the run
@@ -858,7 +1016,8 @@ def main() -> int:
             # linear ones are a solve and the autoencoders come out of the cache.
             print("  nothing refitted this run; rebuilding from the best rows")
             for r in _video_rows(rows):
-                fit_one(_cfg_from_row(r), Q, S, tr, te, latents, args, videos)
+                fit_one(_cfg_from_row(r), Q, S, tr, te, latents, args, videos,
+                        Q_full)
             _write_videos(videos, Q, te, unflat, case0, out, args)
         else:
             _write_videos(videos, Q, te, unflat, case0, out, args)

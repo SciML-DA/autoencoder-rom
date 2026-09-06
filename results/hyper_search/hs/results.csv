@@ -1,0 +1,1 @@
+stage,trial,latent,branch,r_field,n_delays,hidden,cnn_channels,kernel_size,gru_hidden,gru_layers,activation,dropout,weight_decay,sensor_noise,lr,band_hz,ensemble,seed,axis,n_params,size_proxy,nmse_train,nmse_val,cos_val,nmse_test,nmse_fullband,epochs_run,best_epoch,stopped_early,seconds

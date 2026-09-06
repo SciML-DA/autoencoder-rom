@@ -8,6 +8,12 @@ __pycache__/
 # data 
 data/
 
+logs/
+# personal notes and write-ups. never tracked, never referenced from
+# anything in the repo -- `docs/` excludes the directory itself, so git
+# does not descend into it and nothing can be force-added by accident.
+docs/
+
 # plots are regenerable, so only the csv is saved
 # git cannot re-include a file whose parent dir is excluded, so `results/**`
 # plus a directory re-include 
