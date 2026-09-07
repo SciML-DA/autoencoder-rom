@@ -70,11 +70,7 @@ class SensorPlacementMixin:
         if dsm is not None:
             if isinstance(dsm, int):
                 dsm = [dsm, dsm]
-            elif not (
-                isinstance(dsm, list)
-                and len(dsm) == 2
-                and all(isinstance(x, int) for x in dsm)
-            ):
+            elif not (isinstance(dsm, list) and len(dsm) == 2 and all(isinstance(x, int) for x in dsm)):
                 raise ValueError()
         self._down_sample_measurement = dsm
 
@@ -82,10 +78,7 @@ class SensorPlacementMixin:
     def grid_of_measurement(self):
         Nx, Ny = self.grid_shape[1:]
 
-        if (
-            self.domain == self.domain_of_measurement
-            or self.domain_of_measurement is None
-        ):
+        if self.domain == self.domain_of_measurement or self.domain_of_measurement is None:
             x_idx = np.arange(Nx)
             y_idx = np.arange(Ny)
         else:
@@ -101,9 +94,7 @@ class SensorPlacementMixin:
             y_idx = np.where((y >= doi_y_min) & (y <= doi_y_max))[0]
 
         if len(x_idx) == 0 or len(y_idx) == 0:
-            raise ValueError(
-                "Domain of interest does not overlap with original domain grid."
-            )
+            raise ValueError("Domain of interest does not overlap with original domain grid.")
 
         down_sample = self.down_sample_measurement
         if down_sample is not None:
@@ -172,9 +163,7 @@ class SensorPlacementMixin:
             # POD_ESN; an autoencoder returns its local decoder Jacobian.
             basis = self.spatial_basis(z0)
 
-            basis = self._to_physical_grid(basis).transpose(
-                1, 0, 2, 3
-            )  # (r, Nu, Nx, Ny)
+            basis = self._to_physical_grid(basis).transpose(1, 0, 2, 3)  # (r, Nu, Nx, Ny)
 
             basis = np.nan_to_num(basis, nan=0.0)
             basis = basis.reshape(basis.shape[0], Nu, Nx * Ny)
@@ -189,9 +178,7 @@ class SensorPlacementMixin:
             qr_idx = sla.qr(A.T, pivoting=True)[-1]
 
             sensor_idx = measure_grid_idx[qr_idx[:N_sensors]]
-            sensor_idx = sensor_idx.ravel() % (
-                Nx * Ny
-            )  # only the first variable (e.g., ux) for sensor placement
+            sensor_idx = sensor_idx.ravel() % (Nx * Ny)  # only the first variable (e.g., ux) for sensor placement
 
             if np.unique(sensor_idx).size < N_sensors:
                 print(
@@ -200,16 +187,12 @@ class SensorPlacementMixin:
                 sensor_idx = np.unique(sensor_idx)
                 extra_needed = N_sensors - sensor_idx.size
                 if extra_needed > 0:
-                    extra_sensor_idx = measure_grid_idx[
-                        qr_idx[N_sensors : N_sensors + extra_needed]
-                    ]
+                    extra_sensor_idx = measure_grid_idx[qr_idx[N_sensors : N_sensors + extra_needed]]
                     extra_sensor_idx = extra_sensor_idx.ravel() % (Nx * Ny)
                     sensor_idx = np.concatenate([sensor_idx, extra_sensor_idx])
         else:
             if N_sensors < len(one_dom):
-                sensor_idx = np.sort(
-                    self.rng.choice(one_dom, size=N_sensors, replace=False), axis=None
-                )
+                sensor_idx = np.sort(self.rng.choice(one_dom, size=N_sensors, replace=False), axis=None)
             else:
                 sensor_idx = one_dom.copy()
 
@@ -223,9 +206,7 @@ class SensorPlacementMixin:
             plt.figure()
             x_idx, y_idx = np.unravel_index(np.arange(Nx * Ny), (Nx, Ny))
             plt.scatter(x_idx, y_idx, label="Original grid", alpha=0.01)
-            x_idx, y_idx = np.unravel_index(
-                measure_grid_idx[: len(measure_grid_idx) // 2], (Nx, Ny)
-            )
+            x_idx, y_idx = np.unravel_index(measure_grid_idx[: len(measure_grid_idx) // 2], (Nx, Ny))
             plt.scatter(x_idx, y_idx, label="Measurement grid")
             x_idx, y_idx = np.unravel_index(sensor_idx, (Nx, Ny))
             plt.scatter(x_idx, y_idx, label="Sensors")
@@ -287,9 +268,7 @@ class LatentROMMixin:
     @property
     def obs_labels(self):
         if self.measure_modes:
-            obs_labels = [
-                f"${self.latent_symbol}_{j+1}$" for j in np.arange(self.N_latent)
-            ]
+            obs_labels = [f"${self.latent_symbol}_{j + 1}$" for j in np.arange(self.N_latent)]
         else:
             ux_labels = ["${u_x}" + f"_{j}$" for j in np.arange(self.N_sensors)]
             uy_labels = ["${u_y}" + f"_{j}$" for j in np.arange(self.N_sensors)]
@@ -308,15 +287,12 @@ class LatentROMMixin:
         """
         labels = []
         if self.update_state:
-            labels += [
-                f"${self.latent_symbol}_{j+1}$" for j in np.arange(self.N_latent)
-            ]
+            labels += [f"${self.latent_symbol}_{j + 1}$" for j in np.arange(self.N_latent)]
         return labels + self.forecaster_state_labels
 
     # ---- resets -------------------------------------------------------------
 
-    def reset_case(self, reset_projector=False, reset_forecaster=False, Z0=None,
-                   reset_ESN=None, **kwargs):
+    def reset_case(self, reset_projector=False, reset_forecaster=False, Z0=None, reset_ESN=None, **kwargs):
         """Refit the projector and/or reset the forecaster.
 
         Refitting the projector always forces a forecaster reset: the latent
@@ -340,6 +316,4 @@ class LatentROMMixin:
 
     def refit_projector(self, **kwargs):
         """Hook for subclasses whose projector can be refitted in place."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support refitting its projector"
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not support refitting its projector")

@@ -13,7 +13,7 @@ them. The only reliable check is to ask the libraries after they are loaded.
 
 Run it inside a job, before the real work:
 
-    uv run python scripts/check_threads.py
+    uv run python hpc/check_threads.py
 
 Exits non-zero when a library disagrees with the allocation, so a job script can
 fail fast instead of spending its walltime running single-threaded.

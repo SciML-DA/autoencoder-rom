@@ -1,6 +1,6 @@
 # convergence_new
 
-**From:** `scripts/convergence_study.py`, same job as `../convergence/`, rerun
+**From:** `experiments/bl/scripts/convergence_study.py`, same job as `../convergence/`, rerun
 after the autoencoders were replaced by the optimised JAX implementations
 (commit `e42c924`).
 

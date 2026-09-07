@@ -32,4 +32,4 @@ nvidia-smi
 
 # convergence_study.py writes to results/convergence relative to cwd, and Slurm
 # starts in the submit directory, so nothing needs copying back.
-uv run python scripts/convergence_study.py
+uv run python experiments/bl/scripts/convergence_study.py

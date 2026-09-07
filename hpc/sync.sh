@@ -17,25 +17,36 @@ set -euo pipefail
 # They are separate systems with separate home directories -- nothing carries
 # over between them. On cx3 the experiment data already lives on RDS, so `data`
 # and `verify` are not needed there; only `push` is.
+# Your account on the remote. Defaults to the local username, which is right
+# whenever the two match; override it when they do not:
+#
+#   REMOTE_USER=abc123 SYNC_TARGET=cx3 ./hpc/sync.sh push
+#
+# The whole path can be overridden instead, for a layout that is not the
+# institutional default:
+#
+#   REMOTE_ROOT=/scratch/me/autoencoder-rom ./hpc/sync.sh push
+REMOTE_USER="${REMOTE_USER:-$USER}"
+LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_NAME="$(basename "$LOCAL_ROOT")"
+
 case "${SYNC_TARGET:-aero}" in
   aero)
-    REMOTE="aero"
-    REMOTE_ROOT="/home/ljc124/autoencoder-rom"
-    REMOTE_DATA="/home/ljc124/data"
+    REMOTE="${REMOTE_HOST:-aero}"
+    REMOTE_ROOT="${REMOTE_ROOT:-/home/${REMOTE_USER}/${REPO_NAME}}"
+    REMOTE_DATA="${REMOTE_DATA:-/home/${REMOTE_USER}/data}"
     ;;
   cx3)
-    REMOTE="cx3"
-    REMOTE_ROOT="/rds/general/user/ljc124/home/autoencoder-rom"
+    REMOTE="${REMOTE_HOST:-cx3}"
+    REMOTE_ROOT="${REMOTE_ROOT:-/rds/general/user/${REMOTE_USER}/home/${REPO_NAME}}"
     # $EPHEMERAL is 30-day scratch; staging area for anything derived
-    REMOTE_DATA="/rds/general/user/ljc124/ephemeral/data"
+    REMOTE_DATA="${REMOTE_DATA:-/rds/general/user/${REMOTE_USER}/ephemeral/data}"
     ;;
   *)
     echo "unknown SYNC_TARGET '${SYNC_TARGET}' (want aero or cx3)" >&2
     exit 1
     ;;
 esac
-LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
 # rsync filter semantics differ from git's, so this list is deliberately separate
 # from .gitignore rather than derived from it.
 EXCLUDES=(
@@ -110,7 +121,8 @@ case "${1:-}" in
     ssh "${REMOTE}" 'du -sh $HOME 2>/dev/null; quota -s 2>/dev/null | tail -3'
     ;;
   *)
-    echo "usage: [SYNC_TARGET=aero|cx3] $0 {push|pull|pull-logs|pull-videos|data|verify <file>...|quota}" >&2
+    echo "usage: [SYNC_TARGET=aero|cx3] [REMOTE_USER=...] [REMOTE_HOST=...] [REMOTE_ROOT=...] \\" >&2
+    echo "       $0 {push|pull|pull-logs|pull-videos|data|verify <file>...|quota}" >&2
     echo "current target: ${REMOTE} (${REMOTE_ROOT})" >&2
     exit 1
     ;;

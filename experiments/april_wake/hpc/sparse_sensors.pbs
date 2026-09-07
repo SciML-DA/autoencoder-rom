@@ -31,6 +31,7 @@
 
 set -euo pipefail
 source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+source "${PBS_O_WORKDIR:-$PWD}/experiments/april_wake/hpc/env.sh"
 
 # Cap the BLAS threads on a GPU job. The training loop is on the device and the
 # host side is dataloading and the occasional POD; a dozen OpenMP threads

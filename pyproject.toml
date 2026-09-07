@@ -70,7 +70,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.4"
+    "pytest>=8.4",
+    # type stubs for the two dependencies that ship none of their own. Without
+    # these, every h5py and scipy call is `Unknown` to the type checker, and the
+    # only alternative is suppressing the diagnostics file by file.
+    "h5py-stubs>=0.1.2",
+    "scipy-stubs>=1.18",
 ]
 
 [project.urls]
@@ -107,7 +112,7 @@ warn_unused_ignores = true
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -119,5 +124,8 @@ select = [
     "UP", # pyupgrade
 ]
 ignore = [
-    "E501",  # line too long (handled by formatter)
-] 
+    "E501",  
+    "N802",  # function name should be lowercase 
+    "N803",  # argument name should be lowercase 
+    "N806",  # variable in function should be lowercase 
+]

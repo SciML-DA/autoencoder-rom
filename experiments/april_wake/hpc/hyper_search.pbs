@@ -39,6 +39,7 @@
 
 set -euo pipefail
 source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+source "${PBS_O_WORKDIR:-$PWD}/experiments/april_wake/hpc/env.sh"
 hpc_init 4
 hpc_gpu
 

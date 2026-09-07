@@ -1,3 +1,10 @@
+# pyright: strict
+"""Snapshot loading and train/val/test splitting.
+
+Pure numpy: this package imports without torch or jax, which is what lets
+a POD-only or linear-estimator workflow use it without paying for either.
+"""
+
 from .snapshots import SPECS, SnapshotSpec, data_path, load_snapshots
 from .splitting import (
     LEAK_THRESHOLD,

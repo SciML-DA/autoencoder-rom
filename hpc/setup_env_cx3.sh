@@ -52,7 +52,9 @@ Done. Add to ~/.bashrc on cx3:
   export PATH="$HOME/.local/bin:$PATH"
   export UV_CACHE_DIR="$EPHEMERAL/.cache/uv"
   export MPLBACKEND=Agg
-  export RDS_ROOT=/rds/general/project/immanuel/live/Seagate/april_experiment
+  # only if you want it set outside a job; each campaign's jobs source their
+  # own experiments/<name>/hpc/env.sh, which sets it for you
+  export RDS_ROOT=...   # see experiments/<campaign>/hpc/env.sh for the default
 
 Deliberately NOT adding `module load tools/prod` -- see the comment at the top
 of this script. Load modules inside job scripts, where they are needed for CUDA.

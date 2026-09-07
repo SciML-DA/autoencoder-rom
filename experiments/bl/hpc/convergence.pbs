@@ -9,7 +9,7 @@
 # The latent-dimension convergence study on the Challenge1.1 snapshots: every
 # reduction family at every latent size, one dataset.
 #
-#   qsub hpc/convergence.pbs
+#   qsub experiments/bl/hpc/convergence.pbs
 #
 # This is the *other* convergence study -- it answers "how far does a nonlinear
 # encoder beat a linear one at fixed latent size" on clean simulation data. The
@@ -31,4 +31,4 @@ export DATA_ROOT="$TMPDIR"
 
 # convergence_study.py writes to results/convergence relative to cwd, which is
 # $PBS_O_WORKDIR -- already permanent storage, so nothing to copy back.
-uv run python scripts/convergence_study.py "$@"
+uv run python experiments/bl/scripts/convergence_study.py "$@"

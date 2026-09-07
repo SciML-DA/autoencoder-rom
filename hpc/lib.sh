@@ -18,7 +18,7 @@
 #
 #   hpc_workdir     cd to $PBS_O_WORKDIR, mkdir logs/
 #   hpc_live_log    tee stdout+stderr to logs/<job>.<id>.live, tailable mid-run
-#   hpc_env         PYTHONPATH, PATH, uv cache, matplotlib, RDS_ROOT
+#   hpc_env         PYTHONPATH, PATH, uv cache, matplotlib
 #   hpc_threads     the BLAS/OpenMP thread count, resolved properly
 #   hpc_report      what the job actually got, printed once
 #
@@ -69,7 +69,11 @@ hpc_env() {
     # running job used to show nothing for twenty minutes.
     export PYTHONUNBUFFERED=1
 
-    export RDS_ROOT="${RDS_ROOT:-/rds/general/project/immanuel/live/Seagate/april_experiment}"
+    # Deliberately no RDS_ROOT default here. Where a campaign keeps its data is
+    # the campaign's business, and this file is shared by all of them -- it used
+    # to hard-code the April porous-disc project path, which made every other
+    # study inherit one rig's directory. Each campaign declares its own in
+    # experiments/<name>/hpc/env.sh, sourced by its jobs right after hpc_init.
 }
 
 # ── threads ───────────────────────────────────────────────────────────────────

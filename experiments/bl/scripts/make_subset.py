@@ -22,8 +22,8 @@ Output keeps the source's dataset names and native (Nt, Ny, Nx) axis order, so
 `read_h5` reads it with no code change -- only the spec's `downsample` drops to
 the residual factor.
 
-    python hpc/make_subset.py --xs 8 --ys 1                  # 4.4 GB, resolution headroom
-    python hpc/make_subset.py --xs 32 --ys 4 --max-snap 3000 # 166 MB, exactly what bl uses
+    python experiments/bl/scripts/make_subset.py --xs 8 --ys 1                  # 4.4 GB, resolution headroom
+    python experiments/bl/scripts/make_subset.py --xs 32 --ys 4 --max-snap 3000 # 166 MB, exactly what bl uses
 
 Then on the cluster, with the subset written at (xs, ys):
 
@@ -40,7 +40,9 @@ import sys
 import h5py
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/bl/scripts/<name>.py, so three levels up is the
+# repo root. `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from datasets.snapshots import _boxcar  # noqa: E402  the identical filter
 
 FIELDS = ("Uplane", "Vplane", "Wplane")

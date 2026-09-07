@@ -33,7 +33,14 @@ rule "job scripts"
 # each campaign keeps its own under experiments/<name>/hpc/. Both are checked
 # by the same rules -- a job script does not get laxer for living next to the
 # data it reads.
+# nullglob: a pattern that matches nothing must vanish, not survive as a
+# literal. hpc/ currently holds no jobs at all -- every one belongs to a
+# campaign -- and without this the array would contain "hpc/*.pbs" and the
+# first check would report that a file named `*.pbs` is not valid bash.
+shopt -s nullglob
 JOBS=(hpc/*.pbs experiments/*/hpc/*.pbs)
+shopt -u nullglob
+((${#JOBS[@]})) || bad "no job scripts found under hpc/ or experiments/*/hpc/"
 
 for f in "${JOBS[@]}"; do
     if bash -n "$f" 2>/dev/null; then ok "$(basename "$f") parses"
@@ -89,10 +96,10 @@ fi
 
 if env -u OMP_NUM_THREADS NCPUS=4 bash -c \
      "set -euo pipefail; source '$REPO/hpc/lib.sh'; hpc_threads >/dev/null; \
-      uv run python scripts/check_threads.py >/dev/null 2>&1"; then
+      uv run python hpc/check_threads.py >/dev/null 2>&1"; then
     ok "the BLAS actually runs on the allocated threads"
 else
-    bad "a library disagrees with the allocation -- run scripts/check_threads.py"
+    bad "a library disagrees with the allocation -- run hpc/check_threads.py"
 fi
 
 # ── 4. every flag a job script passes exists in the script it calls ───────────
@@ -138,15 +145,29 @@ PY
 # ── 5. RDS ────────────────────────────────────────────────────────────────────
 
 rule "data"
-RDS_ROOT="${RDS_ROOT:-/rds/general/project/immanuel/live/Seagate/april_experiment}"
-if [[ -d "$RDS_ROOT" ]]; then
-    ok "RDS_ROOT readable: $RDS_ROOT"
-    n=$(ls "$RDS_ROOT" 2>/dev/null | wc -l | tr -d ' ')
-    ok "  $n entries"
-else
-    printf '  \033[33mskip\033[0m  RDS_ROOT not mounted here (%s)\n' "$RDS_ROOT"
-    printf '        expected off-cluster; a job on cx3 would fail\n'
-fi
+# Each campaign declares its own data root in experiments/<name>/hpc/env.sh.
+# Sourced in a subshell, one at a time, so this check generalises to a second
+# campaign without edits and without leaking one campaign's exports into the
+# next. Previously this line carried the April project path directly, which
+# made a generic preflight report one specific rig's mount.
+shopt -s nullglob
+ENVS=(experiments/*/hpc/env.sh)
+shopt -u nullglob
+((${#ENVS[@]})) || printf '  \033[33mskip\033[0m  no campaign declares a data root\n'
+for envf in "${ENVS[@]}"; do
+    campaign=$(basename "$(dirname "$(dirname "$envf")")")
+    root=$(bash -c "source '$envf' >/dev/null 2>&1; printf '%s' \"\${RDS_ROOT:-}\"")
+    if [[ -z "$root" ]]; then
+        printf '  \033[33mskip\033[0m  %s declares no RDS_ROOT\n' "$campaign"
+    elif [[ -d "$root" ]]; then
+        ok "$campaign data readable: $root"
+        n=$(ls "$root" 2>/dev/null | wc -l | tr -d ' ')
+        ok "  $n entries"
+    else
+        printf '  \033[33mskip\033[0m  %s data not mounted here (%s)\n' "$campaign" "$root"
+        printf '        expected off-cluster; a job on cx3 would fail\n'
+    fi
+done
 
 # ── 6. the slow ones ──────────────────────────────────────────────────────────
 

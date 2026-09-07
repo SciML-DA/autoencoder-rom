@@ -16,7 +16,9 @@ import matplotlib.pyplot as plt
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# this file is experiments/bl/scripts/<name>.py, so three levels up is the
+# repo root. `src` needs no insert: the editable install puts it on sys.path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from datasets import (
     LEAK_THRESHOLD,
     SHIFT_THRESHOLD,

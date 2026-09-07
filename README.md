@@ -37,7 +37,7 @@ Snapshot files are resolved through `datasets.snapshots.data_path`, which reads
 3. **Run the convergence study**
 
 ```bash
-python scripts/convergence_study.py
+python experiments/bl/scripts/convergence_study.py
 ```
 
 This sweeps latent dimension across every model on one dataset and writes

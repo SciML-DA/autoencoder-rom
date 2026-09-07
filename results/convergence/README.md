@@ -1,7 +1,7 @@
 # convergence
 
-**From:** `qsub hpc/convergence.pbs` (cx3/PBS) or `sbatch hpc/convergence.slr`
-(Aero/Slurm) → `scripts/convergence_study.py`, one subfolder per dataset tag.
+**From:** `qsub experiments/bl/hpc/convergence.pbs` (cx3/PBS) or `sbatch experiments/bl/hpc/convergence.slr`
+(Aero/Slurm) → `experiments/bl/scripts/convergence_study.py`, one subfolder per dataset tag.
 
 **Purpose:** the latent-dimension convergence study on clean *simulation*
 snapshots. Every reduction family — POD, dense AE, conv CAE, in both torch and

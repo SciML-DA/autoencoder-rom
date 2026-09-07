@@ -6,7 +6,7 @@ git (plus the `performance/` figures) — everything else regenerates.
 
 | folder | produced by | question |
 |---|---|---|
-| `convergence/` | `hpc/convergence.pbs` → `scripts/convergence_study.py` | How much does a nonlinear encoder beat POD at fixed latent size, on clean simulation data? |
+| `convergence/` | `experiments/bl/hpc/convergence.pbs` → `experiments/bl/scripts/convergence_study.py` | How much does a nonlinear encoder beat POD at fixed latent size, on clean simulation data? |
 | `convergence_new/` | same, after the JAX rewrite | Do the optimised JAX autoencoders reproduce the torch curves, faster? |
 | `sweeps/` | `perf/sweep.py` | What does each training hyperparameter actually do to the JAX autoencoders? |
 | `performance/` | `perf/baseline.slr`, `perf/regress.py` | Reference timings and golden loss curves for the unoptimised models. |

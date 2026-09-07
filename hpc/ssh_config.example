@@ -1,11 +1,16 @@
 # Append to ~/.ssh/config, then: mkdir -p ~/.ssh/cm && chmod 700 ~/.ssh/cm
+#
+# Replace YOUR_USERNAME with your own college username in all three blocks
+# (it is the same one on both systems). hpc/sync.sh derives its remote paths
+# from $USER by default, so set REMOTE_USER there too if yours differs from
+# your local login name.
 # ControlMaster keeps one authenticated connection alive so rsync/git/scp don't
 # each prompt separately. Aero may also accept SSH keys (try `ssh-copy-id aero`);
 # the central RCS login nodes do not.
 
 Host aero
     HostName spitfire.ae.ic.ac.uk
-    User ljc124
+    User YOUR_USERNAME
     ControlMaster auto
     ControlPath ~/.ssh/cm/%r@%h:%p
     ControlPersist 8h
@@ -15,7 +20,7 @@ Host aero
 # Fallbacks — same home directory, same cluster, use if spitfire is loaded
 Host hurricane typhoon
     HostName %h.ae.ic.ac.uk
-    User ljc124
+    User YOUR_USERNAME
     ControlMaster auto
     ControlPath ~/.ssh/cm/%r@%h:%p
     ControlPersist 8h
@@ -23,7 +28,7 @@ Host hurricane typhoon
 # Central RCS HPC. Separate system, separate home directory, PBS not Slurm.
 Host cx3
     HostName login.cx3.hpc.imperial.ac.uk
-    User ljc124
+    User YOUR_USERNAME
     ControlMaster auto
     ControlPath ~/.ssh/cm/%r@%h:%p
     ControlPersist 8h

@@ -17,6 +17,7 @@
 
 set -euo pipefail
 source "${PBS_O_WORKDIR:-$PWD}/hpc/lib.sh"
+source "${PBS_O_WORKDIR:-$PWD}/experiments/april_wake/hpc/env.sh"
 hpc_init
 
 echo
@@ -26,7 +27,7 @@ echo "=== the environment this job actually got ==="
 # this job before the tests ever run -- and a BLAS reporting an unexpected
 # thread count is something to read and act on, not a reason to throw away the
 # other twenty-nine minutes of checks.
-uv run python scripts/check_threads.py || echo "  (see above -- not fatal here)"
+uv run python hpc/check_threads.py || echo "  (see above -- not fatal here)"
 
 echo
 echo "=== self-contained checks (no RDS) ==="
