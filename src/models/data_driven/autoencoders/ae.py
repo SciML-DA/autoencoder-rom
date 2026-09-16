@@ -257,6 +257,18 @@ class AE(Projector):
     def n_params(self) -> int:
         return sum(q.numel() for net in (self.encoder, self.decoder) for q in net.parameters())
 
+    @property
+    def scale(self) -> np.ndarray:
+        """The per-field scale that `fit` divides inputs by, shape `(N_x, 1)`.
+
+        Raises:
+          AttributeError: If the autoencoder is not fitted.
+        """
+        scale: np.ndarray | None = getattr(self, "_scale", None)
+        if scale is None:
+            raise AttributeError("Not fitted — call fit() first.")
+        return scale
+
     def encode(self, X: np.ndarray) -> np.ndarray:
         Q = self.preprocess_snapshot(X)
         self.encoder.eval()
@@ -412,6 +424,38 @@ class CAE(Projector):
 
     def _decode_grid(self, Z: torch.Tensor) -> torch.Tensor:
         return self.dec_conv(self.dec_fc(Z).view(-1, *self._red_shape))
+
+    @property
+    def scale(self) -> np.ndarray:
+        """The per-field scale that `fit` divides inputs by, shape `(N_x, 1)`.
+
+        Raises:
+          AttributeError: If the autoencoder is not fitted.
+        """
+        scale: np.ndarray | None = getattr(self, "_scale", None)
+        if scale is None:
+            raise AttributeError("Not fitted — call fit() first.")
+        return scale
+
+    def networks(self) -> list[nn.Module]:
+        """Lists every network the autoencoder trains.
+
+        Returns:
+          The convolutional encoder, the dense encoder stage, the dense decoder
+          stage, and the transposed-convolution decoder, in that order.
+        """
+        return self._networks()
+
+    def decode_grid(self, Z: torch.Tensor) -> torch.Tensor:
+        """Decodes latent codes onto the spatial grid, differentiably.
+
+        Args:
+          Z: Latent codes, shape `(B, N_latent)`.
+
+        Returns:
+          Fields in scaled units, shape `(B, Nu, Nx, Ny)`.
+        """
+        return self._decode_grid(Z)
 
     # ── flat (N_x, N_t) <-> grid (N_t, Nu, Nx, Ny) with the solid mask ─────────
 

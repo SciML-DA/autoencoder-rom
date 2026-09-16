@@ -1,35 +1,38 @@
-"""Field estimation from sparse sensors: recover a full field from a few channels.
+# pyright: strict
+"""Estimates a full flow field from a few sensor channels.
 
-The inverse of what ``models/`` does. A ROM takes a field, reduces it and rolls
-it forward in time; this package takes a handful of instantaneous measurements
-and estimates the field they came from, at one instant.
+This package takes sensor measurements and estimates the field they
+came from.
 
-    linear      `PODLSE`, `ExtendedPOD` -- Borée's extended POD and linear
-                stochastic estimation, the baseline           [epod.py]
-    nonlinear   `BranchedAE` -- any `Projector` as encoder/decoder plus a
-                learned sensor branch, trained against a frozen
-                decoder on the latent loss              [branched_ae.py]
-    support     `delay_embed` (causal lag stacking), `mode_observability` and
-                `projection_floor` (the ceilings that say whether the basis,
-                the sensors or the fit is the limit)          [epod.py]
-    JAX         ports of both families      [epod_jax.py, branched_ae_jax.py]
-    figures     `plots` -- spectra, observability, comparisons, animation.
-                Not imported here: nothing in the estimators needs matplotlib,
-                and a headless fit should not pay for it.
+The package contains:
+- `epod`: The linear estimators `PODLSE` and `ExtendedPOD`, plus
+  `delay_embed`, `mode_observability`, and `projection_floor`.
+- `branched_ae`: `BranchedAE`, which trains a sensor branch against the
+  encoder and decoder of a `LinearLatent` or `TorchLatent`, and
+  `LatentForecaster`.
+- `epod_jax` and `branched_ae_jax`: JAX implementations of both families.
+- `plots`: Figures for the estimators' results.
 
-Not under ``models/`` deliberately. Everything there is, or composes, a
-`dynamodels.Model` -- state, history, an integrator, a ``time_step``. Nothing
-here has any of those; these are static maps from measurements to a field.
+Importing this package imports torch and JAX, and enables 64-bit precision in
+JAX.
 
-Rig-independent: the April campaign motivates the design choices and is named
-in the comments that explain them, but every sampling rate, channel count and
-frequency band lives in ``experiments/april_wake/``, never here.
+Typical usage example:
 
-Importing this package pulls in torch and jax eagerly, via ``branched_ae`` and
-``branched_ae_jax``.
+  from field_estimation import PODLSE, delay_embed, split_train_test
+
+  Sd = delay_embed(S, n_delays=25)
+  tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)
+  model = PODLSE(r_field=100, r_sensor=60, ridge=1e-4).fit(Q[:, tr], Sd[:, tr])
+  model.score(Q[:, te], Sd[:, te])
 """
 
-from .epod_jax import PODLSEJax, ExtendedPODJax, pod_jax, ridge_cv_jax
+from .branched_ae import (
+    BranchedAE,
+    LatentForecaster,
+    LinearLatent,
+    SensorBranch,
+    TorchLatent,
+)
 from .branched_ae_jax import BranchedAEJax, LinearLatentJax
 from .epod import (
     PODLSE,
@@ -42,23 +45,17 @@ from .epod import (
     ridge_cv,
     split_train_test,
 )
-from .branched_ae import (
-    BranchedAE,
-    LatentForecaster,
-    LinearLatent,
-    SensorBranch,
-    TorchLatent,
-)
+from .epod_jax import ExtendedPODJax, PODLSEJax, pod_jax, ridge_cv_jax
 
 __all__ = [
-    # JAX ports of the sparse-sensor stack
+    # JAX implementations.
     "PODLSEJax",
     "ExtendedPODJax",
     "pod_jax",
     "ridge_cv_jax",
     "BranchedAEJax",
     "LinearLatentJax",
-    # sparse-sensor reconstruction: linear
+    # Linear estimators.
     "PODLSE",
     "ExtendedPOD",
     "extended_pod",
@@ -68,7 +65,7 @@ __all__ = [
     "nmse",
     "ridge_cv",
     "split_train_test",
-    # sparse-sensor reconstruction: nonlinear
+    # Nonlinear estimators.
     "BranchedAE",
     "SensorBranch",
     "LinearLatent",
