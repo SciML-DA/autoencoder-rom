@@ -146,7 +146,7 @@ def test_pod_sensor_placement_unchanged(data):
 # ---------------------------------------------------------------------------
 
 @slow
-@pytest.mark.parametrize("name", ["AE_ESN", "CAE_ESN"])
+@pytest.mark.parametrize("name", ["AE_ESN", "CAE_ESN", "AEJax_ESN", "CAEJax_ESN"])
 def test_autoencoder_rom_end_to_end(data, name):
     import models.data_driven as dd
 
@@ -237,7 +237,7 @@ def test_lstm_model_state_layout_and_step_contract(data):
 
 
 @slow
-@pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM"])
+@pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM", "AEJax_LSTM"])
 def test_rom_keeps_projector_and_forecaster_histories(data, name):
     """Both training histories survive construction, which overwrites `training_history`."""
     import models.data_driven as dd
@@ -258,7 +258,7 @@ def test_rom_keeps_projector_and_forecaster_histories(data, name):
 
 
 @slow
-@pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM", "CAE_LSTM"])
+@pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM", "CAE_LSTM", "AEJax_LSTM", "CAEJax_LSTM"])
 def test_lstm_roms_place_sensors_and_forecast(data, name):
     """Every LSTM ROM places sensors and forecasts finite observables."""
     import models.data_driven as dd

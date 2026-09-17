@@ -5,12 +5,11 @@ coefficients, with a forecaster, which advances those coefficients in time.
 
     autoencoders/   projectors: POD, SPOD, AE, CAE, AEJax, CAEJax
     forecasters/    forecasters: ESN_model, LSTM, LSTM_model
-    roms/           ROMs: POD, AE, and CAE, each with ESN or LSTM
+    roms/           ROMs: POD, AE, CAE, AEJax, and CAEJax, each with ESN or LSTM
     latent_rom.py   LatentROM, the base class the ROMs share
 
 This package re-exports the forecasters and ROMs. Importing it imports neither
-torch nor JAX; `AE_ESN`, `CAE_ESN`, `AE_LSTM`, and `CAE_LSTM` load their modules
-on first access.
+torch nor JAX; the autoencoder ROMs load their modules on first access.
 
 Typical usage example:
 
@@ -30,8 +29,12 @@ from .latent_rom import LatentROM
 from .roms import POD_ESN, POD_LSTM
 
 __all__ = [
+    "AEJax_ESN",
+    "AEJax_LSTM",
     "AE_ESN",
     "AE_LSTM",
+    "CAEJax_ESN",
+    "CAEJax_LSTM",
     "CAE_ESN",
     "CAE_LSTM",
     "LSTM",
@@ -46,7 +49,7 @@ __all__ = [
     "roms",
 ]
 
-_LAZY = ("AE_ESN", "CAE_ESN", "AE_LSTM", "CAE_LSTM")
+_LAZY = ("AE_ESN", "CAE_ESN", "AE_LSTM", "CAE_LSTM", "AEJax_ESN", "CAEJax_ESN", "AEJax_LSTM", "CAEJax_LSTM")
 
 
 def __getattr__(name: str) -> Any:

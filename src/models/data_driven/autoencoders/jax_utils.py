@@ -7,7 +7,7 @@ Typical usage example:
       def fit(self, X):
           Q, _ = self._prepare_fit(X)
           self._configure()
-          self.params, history = self._train(data, self._init_params, step, loss)
+          self.weights, history = self._train(data, self._init_params, step, loss)
           self._finish_fit(history)
           return self
 """
@@ -272,7 +272,7 @@ class JaxAutoencoder[P](Autoencoder):
       layer_activations: Activation of the decoder's hidden layers, in the same
         form. `None` uses `activation`.
       dtype: Precision of the parameters, `"float32"` or `"float64"`.
-      params: The trained parameters, or `None` before `fit`.
+      weights: The trained parameters, or `None` before `fit`.
 
     Raises:
       ValueError: If an option is out of range or `dtype` is not float32 or
@@ -283,7 +283,7 @@ class JaxAutoencoder[P](Autoencoder):
     layer_activations: ActivationSpec | None = None
     dtype: DTypeLike = "float32"
 
-    params: P | None = field(default=None, init=False)
+    weights: P | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         """Validates the options.
@@ -305,9 +305,9 @@ class JaxAutoencoder[P](Autoencoder):
     @property
     def n_params(self) -> int:
         """Number of trainable parameters, or 0 before `fit`."""
-        if self.params is None:
+        if self.weights is None:
             return 0
-        leaves: list[jax.Array] = jax.tree.leaves(self.params)
+        leaves: list[jax.Array] = jax.tree.leaves(self.weights)
         return int(sum(a.size for a in leaves))
 
     @abstractmethod
@@ -332,9 +332,9 @@ class JaxAutoencoder[P](Autoencoder):
           RuntimeError: If `fit` has not completed.
         """
         self._check_fitted()
-        if self.params is None:
+        if self.weights is None:
             raise RuntimeError(f"{type(self).__name__} is not fitted; call fit() first")
-        return self.params
+        return self.weights
 
     def _check_precision(self) -> None:
         """Checks that JAX can compute in the requested precision.
@@ -412,13 +412,13 @@ class JaxAutoencoder[P](Autoencoder):
         """Collects the trained parameters.
 
         Returns:
-          The parameter leaves, in `jax.tree.leaves` order, named `params.<i>`.
+          The parameter leaves, in `jax.tree.leaves` order, named `weights.<i>`.
 
         Raises:
           RuntimeError: If `fit` has not completed.
         """
         leaves: list[jax.Array] = jax.tree.leaves(self._trained_params())
-        return {f"params.{i}": np.asarray(a) for i, a in enumerate(leaves)}
+        return {f"weights.{i}": np.asarray(a) for i, a in enumerate(leaves)}
 
     def _load_weight_arrays(self, arrays: Mapping[str, npt.NDArray[Any]]) -> None:
         """Builds the architecture and loads the trained parameters.
@@ -429,10 +429,10 @@ class JaxAutoencoder[P](Autoencoder):
         self._configure()
         skeleton = self._init_params(jax.random.key(0))
         n_leaves = len(jax.tree.leaves(skeleton))
-        stored = iter([jnp.asarray(arrays[f"params.{i}"]) for i in range(n_leaves)])
+        stored = iter([jnp.asarray(arrays[f"weights.{i}"]) for i in range(n_leaves)])
 
         def restore(_: jax.Array) -> jax.Array:
             """Returns the next stored parameter array."""
             return next(stored)
 
-        self.params = jax.tree.map(restore, skeleton)
+        self.weights = jax.tree.map(restore, skeleton)

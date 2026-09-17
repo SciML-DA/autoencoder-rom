@@ -318,7 +318,7 @@ class AEJax(JaxAutoencoder[AEParams]):
             return cast("jax.Array", _eval_loss(params, X_val, cfg))
 
         data = jnp.asarray((Q / self.scale).T, dtype=cfg.dtype)
-        self.params, history = self._train(data, self._init_params, step, loss)
+        self.weights, history = self._train(data, self._init_params, step, loss)
         self._finish_fit(history)
         return self
 

@@ -478,7 +478,7 @@ class CAEJax(JaxAutoencoder[CAEParams]):
             return cast("jax.Array", _eval_loss(params, G_val, cfg, mask))
 
         data = flat_to_grid(Q / self.scale, cfg, idx)
-        self.params, history = self._train(data, self._init_params, step, loss)
+        self.weights, history = self._train(data, self._init_params, step, loss)
         self._finish_fit(history)
         return self
 

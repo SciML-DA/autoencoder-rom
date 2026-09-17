@@ -961,7 +961,7 @@ class BranchedAEJax:
       seed: PRNG seed.
       dtype: Precision to train in.
       verbose: Print each learning-rate decay.
-      params: The trained parameters, or `None` before `fit`.
+      weights: The trained parameters, or `None` before `fit`.
       cfg: The branch architecture `fit` built, or `None` before `fit`.
       s_mean: Per-channel sensor mean, learned by `fit`.
       s_scale: Per-channel sensor scale, learned by `fit`.
@@ -1000,7 +1000,7 @@ class BranchedAEJax:
     dtype: Dtype = "float32"
     verbose: bool = False
 
-    params: BranchParams | None = field(default=None, repr=False)
+    weights: BranchParams | None = field(default=None, repr=False)
     cfg: SensorBranchConfig | None = field(default=None, repr=False)
     s_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
     s_scale: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
@@ -1171,7 +1171,7 @@ class BranchedAEJax:
                     if wait >= self.patience:
                         break
 
-        self.params = best_params if va_i is not None else params
+        self.weights = best_params if va_i is not None else params
         self.fitted = True
         return self
 
@@ -1254,9 +1254,9 @@ class BranchedAEJax:
     @property
     def n_params(self) -> int:
         """Number of trainable parameters in the sensor branch, or 0 before `fit`."""
-        if not self.params:
+        if not self.weights:
             return 0
-        leaves: list[jax.Array] = jax.tree.leaves(self.params)
+        leaves: list[jax.Array] = jax.tree.leaves(self.weights)
         return int(sum(x.size for x in leaves))
 
     def _check(self) -> None:
@@ -1279,6 +1279,6 @@ class BranchedAEJax:
         Raises:
           RuntimeError: If `fit` has not been called.
         """
-        if not self.fitted or self.params is None or self.cfg is None:
+        if not self.fitted or self.weights is None or self.cfg is None:
             raise RuntimeError("call fit() before encode()/predict()/score()")
-        return self.params, self.cfg
+        return self.weights, self.cfg

@@ -671,7 +671,7 @@ def test_jax_float32_stays_float32_with_x64(v):
         ),
     }
     for name, m in models.items():
-        dtypes = {str(a.dtype) for a in jax.tree.leaves(m.params)}
+        dtypes = {str(a.dtype) for a in jax.tree.leaves(m.weights)}
         assert dtypes == {"float32"}, f"{name} params are {dtypes}"
 
 
