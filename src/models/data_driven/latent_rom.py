@@ -1,7 +1,7 @@
 """Projector-agnostic machinery shared by every latent ROM.
 
 A latent ROM is a `Projector` (POD, SPOD, AE, CAE, ...) that reduces a field to
-a handful of coefficients, plus a `Forecaster` (ESN, LSTM) trained to roll those
+a handful of coefficients, plus a forecaster (ESN, LSTM) trained to roll those
 coefficients forward. Everything in this module is the part that does not care
 which of either it got:
 
@@ -15,14 +15,12 @@ which of either it got:
     Latent <-> forecaster plumbing: reading latent coefficients out of the model
     history, decoding them at the sensors, labels, and resets.
 
-Both are written against the `Forecaster` protocol rather than `ESN_model`, so
-adding `LSTM_model` costs leaf classes and not edits here. The leaf classes and
-the constructor they share live in ``roms/``.
+Both work with either forecaster wrapper, `ESN_model` or `LSTM_model`. The leaf
+classes and the constructor they share live in ``roms/``.
 """
 
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as sla
 
@@ -125,7 +123,6 @@ class SensorPlacementMixin:
         down_sample_measurement=None,
         N_sensors=None,
         qr_selection=False,
-        plot=False,
     ):
         self.measure_modes = measure_modes
         if measure_modes:
@@ -135,15 +132,13 @@ class SensorPlacementMixin:
             self.domain_of_measurement = domain_of_measurement
             self.down_sample_measurement = down_sample_measurement
             self.qr_selection = qr_selection
-            self.sensor_locations = self.define_sensors(N_sensors=N_sensors, plot=plot)
+            self.sensor_locations = self.define_sensors(N_sensors=N_sensors)
             self.Nq = len(self.sensor_locations)
 
-    def define_sensors(self, N_sensors=None, plot=False, z0=None):
+    def define_sensors(self, N_sensors=None, z0=None):
         """Place ``N_sensors`` sensors by QR column-pivoting on the projector's
         spatial basis, or at random when ``qr_selection`` is off.
 
-        ``plot`` defaults to False: this used to call ``plt.show()``
-        unconditionally, which blocks a batch job on any interactive backend.
         ``z0`` is forwarded to `Projector.spatial_basis` -- ignored by POD,
         used by the autoencoders to choose where to linearise the decoder.
         """
@@ -201,18 +196,6 @@ class SensorPlacementMixin:
                 f"Requested number of sensors {N_sensors} >= grid size in domain of measurement ({len(measure_grid_idx)})"
             )
 
-        if plot:
-            # sensors against the original and measurement grids, for debugging
-            plt.figure()
-            x_idx, y_idx = np.unravel_index(np.arange(Nx * Ny), (Nx, Ny))
-            plt.scatter(x_idx, y_idx, label="Original grid", alpha=0.01)
-            x_idx, y_idx = np.unravel_index(measure_grid_idx[: len(measure_grid_idx) // 2], (Nx, Ny))
-            plt.scatter(x_idx, y_idx, label="Measurement grid")
-            x_idx, y_idx = np.unravel_index(sensor_idx, (Nx, Ny))
-            plt.scatter(x_idx, y_idx, label="Sensors")
-            plt.legend()
-            plt.show()
-
         # sensors for all u
         sensor_idx = [sensor_idx + Nx * Ny * i for i in range(self.grid_shape[0])]
 
@@ -220,11 +203,9 @@ class SensorPlacementMixin:
 
 
 class LatentROMMixin:
-    """Latent-space plumbing between a `Projector` and a `Forecaster`.
+    """Latent-space plumbing between a `Projector` and a forecaster.
 
-    Deliberately phrased in terms of *latent coefficients*, not POD modes, and
-    of the `Forecaster` protocol, not `ESN_model`, so the same code serves
-    POD/AE/CAE crossed with ESN/LSTM.
+    Serves POD, AE, and CAE crossed with `ESN_model` and `LSTM_model`.
     """
 
     #: label for the latent coordinates in figures; overridden by POD_ESN to

@@ -78,13 +78,14 @@ import numpy as np  # noqa: E402
 # `src` needs no insert: the editable install puts it on sys.path.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
+from experiments.april_wake.case_reader import F_PIV_HZ, RUNS  # noqa: E402
 from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,
     band_limit,
     load_data,
     make_split,
 )
-from experiments.april_wake.case_reader import F_PIV_HZ, RUNS  # noqa: E402
+from field_estimation import plots as rp  # noqa: E402
 from field_estimation.branched_ae import TorchLatent, default_device  # noqa: E402
 from field_estimation.epod import (  # noqa: E402
     cosine,
@@ -95,7 +96,6 @@ from field_estimation.epod import (  # noqa: E402
     pod,
     projection_floor,
 )
-from field_estimation import plots as rp  # noqa: E402
 
 CSV_FIELDS = [
     "stage",

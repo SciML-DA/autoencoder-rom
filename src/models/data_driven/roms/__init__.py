@@ -1,4 +1,4 @@
-"""The assembled reduced-order models: a `Projector` crossed with a `Forecaster`.
+"""The assembled reduced-order models: a `Projector` crossed with a forecaster.
 
 ``autoencoders/`` holds the projectors and ``forecasters/`` the forecasters;
 this package is where the two are joined. Every class here is a leaf
@@ -11,9 +11,9 @@ projector-agnostic plumbing once in `latent_rom`.
     AE                        AE_ESN       AE_LSTM
     CAE                       CAE_ESN      CAE_LSTM
 
-`POD_ESN` is the exception: it predates the generalisation, is the class romda's
-side recognises, and carries plot/PDF logic the others do not, so it keeps its
-own constructor and shares only the mixins.
+`POD_ESN` is the exception: it predates the generalisation and is the class
+romda's side recognises, so it keeps its own constructor and shares only the
+mixins.
 
 Import boundary
 ---------------

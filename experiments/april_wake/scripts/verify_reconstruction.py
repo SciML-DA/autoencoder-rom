@@ -57,6 +57,7 @@ import numpy as np
 # `src` needs no insert: the editable install puts it on sys.path.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
+from datasets import split_indices  # noqa: E402
 from experiments.april_wake import case_reader as we  # noqa: E402
 from field_estimation.branched_ae import (  # noqa: E402
     BranchedAE,
@@ -76,7 +77,6 @@ from field_estimation.epod import (  # noqa: E402
     nmse,
     pod,
     projection_floor,
-    split_train_test,
 )
 
 CHECKS = []
@@ -348,7 +348,7 @@ def error_grows_with_sensor_noise(v):
     errs = []
     for snr in (60, 40, 20, 10):
         c = toy(response="linear", snr_db=snr, seed=1)
-        tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40)
+        tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40)
         m = PODLSE(r_field=c["rank"], r_sensor=8, ridge=1e-4).fit(c["Q"][:, tr], c["S"][:, tr])
         errs.append(m.score(c["Q"][:, te], c["S"][:, te]))
     ok = all(b > a for a, b in zip(errs, errs[1:]))
@@ -366,7 +366,7 @@ def linear_floor_under_nonlinearity(v):
     out = {}
     for resp in ("linear", "quadratic"):
         c = toy(response=resp, seed=2)
-        tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40)
+        tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40)
         m = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
         out[resp] = m.score(c["Q"][:, te], c["S"][:, te])
     ok = out["linear"] < 1e-10 < out["quadratic"]
@@ -401,7 +401,7 @@ def observability_is_one_for_linear_sensors(v):
 def projection_floor_bounds_every_estimator(v):
     """No estimator using a basis can score below that basis's truncation error."""
     c = toy(response="quadratic", seed=3)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40)
     r = 3
     Psi, _, _, qm = pod(c["Q"][:, tr], r, subtract_mean=True)
     floor = projection_floor(c["Q"][:, te], Psi, qm)
@@ -436,7 +436,7 @@ def delay_embed_raises_rank(v):
     Lagged copies raise that ceiling, and the score has to fall accordingly.
     """
     c = toy(response="linear", n_sensors=3, rank=6, seed=4)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=60, warmup=20)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=60, warmup=20)
     inst = PODLSE(r_field=6, r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e0 = inst.score(c["Q"][:, te], c["S"][:, te])
     Sd = delay_embed(c["S"], 21)
@@ -457,7 +457,7 @@ def no_leakage(v):
     """
     c = toy(response="quadratic", n_t=1500, seed=5)
     n = c["Q"].shape[1]
-    tr, te = split_train_test(n, 0.25, gap=60)
+    tr, _, te = split_indices(n, val_frac=0, test_frac=0.25, gap=60)
     m = PODLSE(r_field=c["rank"], r_sensor=None, ridge=1e-6).fit(c["Q"][:, tr], c["S"][:, tr])
     contig = m.score(c["Q"][:, te], c["S"][:, te])
 
@@ -526,7 +526,7 @@ def branched_linear_matches_podlse(v):
     the preprocessing, not a training-length issue.
     """
     c = toy(response="quadratic", seed=6)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40, warmup=0)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40, warmup=0)
     Psi, _, _, qm = pod(c["Q"][:, tr], c["rank"], subtract_mean=True)
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e_closed = closed.score(c["Q"][:, te], c["S"][:, te])
@@ -572,7 +572,7 @@ def branch_beats_the_linear_floor(v):
     succeed on the experiment.
     """
     c = toy(response="quadratic", n_t=2000, seed=7)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=60, warmup=0)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=60, warmup=0)
     Psi, _, _, qm = pod(c["Q"][:, tr], c["rank"], subtract_mean=True)
     lat = LinearLatent(Psi, qm, device="cpu")
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])

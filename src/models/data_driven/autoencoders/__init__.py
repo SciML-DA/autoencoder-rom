@@ -23,7 +23,8 @@ Class hierarchy
     |     inherits all POD helpers; only _decompose is overridden
     |-- AE(Projector)    Fully-connected autoencoder (MLP, PyTorch)     [ae.py]
     |-- CAE(Projector)   Convolutional autoencoder (PyTorch)            [ae.py]
-    |-- AEJax / CAEJax   The same two, hand-written in JAX          [ae_jax.py]
+    |-- AEJax(Projector) AE, hand-written in JAX                    [ae_jax.py]
+    |-- CAEJax(Projector) CAE, hand-written in JAX                 [cae_jax.py]
 
 These are pure dimensionality-reduction tools -- they have no temporal
 forecaster. Combine with an ESN or LSTM in ``models/data_driven/`` to build a
@@ -310,7 +311,7 @@ _LAZY = {
     "AE": ".ae",
     "CAE": ".ae",
     "AEJax": ".ae_jax",
-    "CAEJax": ".ae_jax",
+    "CAEJax": ".cae_jax",
     "spod_towne": ".pod_utils",
     "print_spod_towne_summary": ".pod_utils",
 }

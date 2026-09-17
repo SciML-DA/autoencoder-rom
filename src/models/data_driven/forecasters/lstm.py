@@ -4,8 +4,7 @@ Two layers in one module, on purpose:
 
 `LSTM`
     A single-layer LSTM trained by truncated BPTT -- gates, gradients,
-    closed-loop validation. Pure numpy; no framework. It satisfies the
-    `Forecaster` protocol in this package's ``__init__``.
+    closed-loop validation. Pure numpy; no framework.
 `LSTM_model`
     That forecaster as a `Model`, so it can be integrated and given a history.
     The sibling of `esn.ESN_model`, and deliberately the *second*
@@ -73,6 +72,9 @@ class LSTM:
     def __init__(self, N_dim_in, N_units, seed=0, **kwargs):
         self.N_dim_in = N_dim_in  # observable/physical dim
         self.N_units = N_units  # the "reservoir" size (high dimensional latent size)
+        self._trained = False
+        self._norm = np.ones((N_dim_in, 1))
+        self._shift = np.zeros((N_dim_in, 1))
 
         keys = list(kwargs.keys())
         [setattr(self, key, kwargs.pop(key)) for key in keys if hasattr(LSTM, key)]
@@ -122,12 +124,10 @@ class LSTM:
     @property
     def trained(self):
         """Flag to check if the model has been trained"""
-        return getattr(self, "_trained", False)
+        return self._trained
 
     @property
     def norm(self) -> np.ndarray:
-        if not hasattr(self, "_norm"):
-            return np.ones((self.N_dim_in, 1))
         return self._norm
 
     @norm.setter
@@ -138,8 +138,6 @@ class LSTM:
 
     @property
     def shift(self) -> np.ndarray:
-        if not hasattr(self, "_shift"):
-            return np.zeros((self.N_dim_in, 1))
         return self._shift
 
     @shift.setter
@@ -460,49 +458,6 @@ class LSTM:
         # same definition as EchoStateNetwork.compute_nRMSE, so the two are comparable
         return np.mean(np.sqrt((Y_true - Y_pred) ** 2)) / np.mean(np.sqrt(norm**2))
 
-    def gradient_check(self, data, n_probe=6, eps=1e-5, seed=0):
-        """
-        Central-difference check of backward() against forward(). Returns the worst
-        relative error over n_probe random entries of each parameter
-        """
-        sequences = self._as_sequences(data)
-        if self.trained:
-            norm, shift = self.norm, self.shift
-        else:
-            norm, shift = self._set_norm(sequences, method=self.norm_method)
-
-        U = (sequences[0] - shift) / norm
-        X, Yt = U[:-1], U[1:]
-
-        def loss():
-            Yh, caches, _ = self.forward(X)
-            return 0.5 * np.mean((Yh - Yt) ** 2), Yh, caches
-
-        L, Yh, caches = loss()
-        grads = self.backward(caches, (Yh - Yt) / (Yh.shape[0] * self.N_dim_in))
-        floor = 100.0 * np.finfo(float).eps * max(L, 1.0) / eps
-
-        rng = np.random.default_rng(seed)
-        worst = 0.0
-
-        for key, P in self.p.items():
-            for _ in range(n_probe):
-                idx = tuple(rng.integers(0, s) for s in P.shape)
-                p0 = P[idx]
-
-                P[idx] = p0 + eps
-                Lp = loss()[0]
-                P[idx] = p0 - eps
-                Lm = loss()[0]
-                P[idx] = p0
-
-                num, ana = (Lp - Lm) / (2 * eps), grads[key][idx]
-                if abs(num) + abs(ana) < floor:
-                    continue
-                worst = max(worst, abs(num - ana) / (abs(num) + abs(ana)))
-
-        return worst
-
     # warms up on a true sequence and then returns the final (h, c) and prediction
     def openLoop(self, X_phys):
         X = self.normalize_input(self._as_sequences(X_phys)[0])
@@ -521,8 +476,6 @@ class LSTM_model(LSTM, Model):
 
     Training data is mandatory at construction, as for `ESN_model`.
     """
-
-    figs_folder: str = "figs/LSTM/"
 
     update_state = True
     update_memory = True  # carry (h, c) in psi -- the LSTM's analogue of the reservoir
@@ -562,7 +515,7 @@ class LSTM_model(LSTM, Model):
     def rng(self, value):
         self._rng = value
 
-    def __init__(self, data=None, dt=1.0, y0=None, plot_training=False, **kwargs):
+    def __init__(self, data=None, dt=1.0, y0=None, verbose=False, **kwargs):
         """
         Parameters
         ----------
@@ -573,6 +526,8 @@ class LSTM_model(LSTM, Model):
             Time step of the training data.
         y0 : np.ndarray, optional
             Initial state; taken from the data when omitted.
+        verbose : bool
+            Print the loss after every training epoch.
         """
         for key in list(kwargs.keys()):
             if key in vars(LSTM_model):
@@ -601,7 +556,7 @@ class LSTM_model(LSTM, Model):
         # ---- 2. train it -------------------------------------------------
         if not self.trained:
             print("Training LSTM model...")
-            self.train(data, verbose=plot_training)
+            self.train(data, verbose=verbose)
 
         # Rescue the training-loss curves before Model.__init__ rebinds
         # `history` to its HistoryTracker (see the collision note above).

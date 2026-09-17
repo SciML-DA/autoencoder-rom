@@ -10,7 +10,7 @@ identical conditions on the same card:
     torch_orig   PyTorch before any perf work    e42c924^ src/tools/autoencoders.py
     jax_orig     JAX before the optimisation     e42c924^ src/tools/autoencoders_jax.py
     torch_new    PyTorch, current                src/models/data_driven/autoencoders/ae.py
-    jax_new      JAX, current                    src/models/data_driven/autoencoders/ae_jax.py
+    jax_new      JAX, current                    src/models/data_driven/autoencoders/{ae,cae}_jax.py
 
 `stage.sh` assembles those into impls/ae_orig and impls/ae_new next to this file.
 
@@ -96,8 +96,10 @@ def build(impl: str, model: str, k: int, n_epochs: int, val_fraction: float, dev
 
     if impl == "jax_orig":
         from ae_orig import autoencoders_jax as mod
-    else:
+    elif model == "AE":
         from ae_new import ae_jax as mod
+    else:
+        from ae_new import cae_jax as mod
     if model == "AE":
         arch = {"hidden": HIDDEN(k)}
     return getattr(mod, model + "Jax")(n_latent=k, activation="tanh", threshold=1e-4, **arch, **kw)

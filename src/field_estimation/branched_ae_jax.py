@@ -24,16 +24,19 @@ sample first, so window `t` covers samples `t - (n_delays - 1) * stride` through
 `t`. The first `warmup` snapshots have partly zero-padded windows; `fit` raises
 if `train_idx` includes them.
 
-The default loss is `||G(s) - E(phi)||^2`. Setting `lambda_field` above 0 adds
-the decoded field term, which needs a latent space with a JAX decoder, such as
-`LinearLatentJax`.
+The loss is
+
+    L = ||G(s) - E(phi)||^2 + lambda_field * ||D(G(s)) - phi||^2
+
+where `E` and `D` are the latent space's `encode` and `decode_jax`.
 
 Typical usage example:
 
   from field_estimation.branched_ae_jax import BranchedAEJax, LinearLatentJax
-  from field_estimation.epod import pod, split_train_test
+  from datasets import split_indices
+  from field_estimation.epod import pod
 
-  tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)
+  tr, _, te = split_indices(Q.shape[1], val_frac=0, test_frac=0.25, gap=100, warmup=24)
   Psi, _, _, q_mean = pod(Q[:, tr], r=64, subtract_mean=True)
   model = BranchedAEJax(LinearLatentJax(Psi, q_mean), branch="mlp").fit(Q, S, tr)
   model.score(Q, S, te)
@@ -57,6 +60,7 @@ __all__ = [
     "SensorBranchConfig",
     "BranchedAEJax",
     "LinearLatentJax",
+    "AutoencoderLatentJax",
     "sensor_windows",
     "init_branch",
     "branch_forward",
@@ -392,8 +396,7 @@ def branch_forward(params: BranchParams, x: jax.Array, cfg: SensorBranchConfig) 
 class LinearLatentJax:
     """Wraps a POD basis as an encoder and decoder pair.
 
-    The encoder is `Psi.T` and the decoder is `Psi`. `decode_jax` is
-    differentiable, thus `BranchedAEJax` can train with `lambda_field` above 0.
+    The encoder is `Psi.T` and the decoder is `Psi`.
 
     Args:
       Psi: Spatial modes with orthonormal columns, shape `(N_x, r)`.
@@ -449,6 +452,125 @@ class LinearLatentJax:
           Physical fields, shape `(B, N_x)`.
         """
         return Zt @ self.Psi.T + self.q_mean.T
+
+
+class _JaxAutoencoder(Protocol):
+    """The members of a fitted `AEJax` or `CAEJax` that `AutoencoderLatentJax` reads."""
+
+    @property
+    def fitted(self) -> bool:
+        """Whether `fit` has run."""
+        ...
+
+    @property
+    def N_latent(self) -> int:
+        """Dimension of the latent space."""
+        ...
+
+    @property
+    def scale(self) -> FloatArray:
+        """The per-field scale the projector divides inputs by, shape `(N_x, 1)`."""
+        ...
+
+    @property
+    def Q_mean(self) -> FloatArray:
+        """The temporal mean the projector subtracts, shape `(N_x, 1)`."""
+        ...
+
+    def encode(self, X: FloatArray) -> FloatArray:
+        """Encodes physical fields into latent codes.
+
+        Args:
+          X: Physical fields, shape `(N_x, N_t)`.
+
+        Returns:
+          Latent codes, shape `(N_latent, N_t)`.
+        """
+        ...
+
+    def decode(self, Z: FloatArray) -> FloatArray:
+        """Decodes latent codes into physical fields.
+
+        Args:
+          Z: Latent codes, shape `(N_latent, N_t)`.
+
+        Returns:
+          Physical fields, shape `(N_x, N_t)`.
+        """
+        ...
+
+    def decode_scaled(self, Z: jax.Array) -> jax.Array:
+        """Decodes a batch of latent codes differentiably.
+
+        Args:
+          Z: Latent codes, shape `(B, N_latent)`.
+
+        Returns:
+          Fields in the projector's scaled units, shape `(B, N_x)`.
+        """
+        ...
+
+
+class AutoencoderLatentJax:
+    """Wraps a fitted `AEJax` or `CAEJax` as an encoder and decoder pair.
+
+    The projector's weights stay fixed.
+
+    Args:
+      projector: A fitted `AEJax` or `CAEJax`.
+      dtype: Precision `decode_jax` returns. Match `BranchedAEJax.dtype`.
+
+    Raises:
+      ValueError: If the projector is not fitted.
+    """
+
+    def __init__(self, projector: _JaxAutoencoder, dtype: Dtype = "float32"):
+        if not projector.fitted:
+            raise ValueError("wrap a fitted AEJax or CAEJax; call projector.fit(X) first")
+
+        dt = _scalar_type(dtype)
+        self.projector = projector
+        self.n_latent = int(projector.N_latent)
+        self.scale_row: jax.Array = jnp.asarray(projector.scale, dt).reshape(1, -1)
+        self.mean_row: jax.Array = jnp.asarray(projector.Q_mean, dt).reshape(1, -1)
+        if self.scale_row.shape != self.mean_row.shape:
+            raise ValueError(
+                f"projector scale has {self.scale_row.shape[1]} entries but Q_mean has {self.mean_row.shape[1]}"
+            )
+
+    def encode(self, Q: FloatArray) -> FloatArray:
+        """Encodes physical fields with the wrapped projector.
+
+        Args:
+          Q: Physical fields, shape `(N_x, N_t)`.
+
+        Returns:
+          Latent codes, shape `(n_latent, N_t)`.
+        """
+        return np.asarray(self.projector.encode(Q), np.float64)
+
+    def decode(self, Z: FloatArray) -> FloatArray:
+        """Decodes latent codes with the wrapped projector.
+
+        Args:
+          Z: Latent codes, shape `(n_latent, N_t)`.
+
+        Returns:
+          Physical fields, shape `(N_x, N_t)`.
+        """
+        return np.asarray(self.projector.decode(Z), np.float64)
+
+    def decode_jax(self, Zt: jax.Array) -> jax.Array:
+        """Reconstructs physical fields from a batch of latent codes.
+
+        Args:
+          Zt: Latent codes, shape `(B, n_latent)`.
+
+        Returns:
+          Physical fields, shape `(B, N_x)`.
+        """
+        fields = self.projector.decode_scaled(Zt).astype(self.scale_row.dtype)
+        return fields * self.scale_row + self.mean_row
 
 
 # ── Optimizer ─────────────────────────────────────────────────────────────────
@@ -553,7 +675,7 @@ def adam_update(
         Returns:
           The bias-corrected estimate.
         """
-        return x / (1 - b1**t)
+        return x / (1 - b1**t).astype(x.dtype)
 
     def correct_second(x: jax.Array) -> jax.Array:
         """Removes the startup bias from a second-moment estimate.
@@ -564,7 +686,7 @@ def adam_update(
         Returns:
           The bias-corrected estimate.
         """
-        return x / (1 - b2**t)
+        return x / (1 - b2**t).astype(x.dtype)
 
     def step(p: jax.Array, m_: jax.Array, v_: jax.Array) -> jax.Array:
         """Applies the Adam step and weight decay to one parameter.
@@ -577,7 +699,7 @@ def adam_update(
         Returns:
           The updated parameter value.
         """
-        return p - lr * (m_ / (jnp.sqrt(v_) + eps) + wd * p)
+        return p - jnp.asarray(lr, p.dtype) * (m_ / (jnp.sqrt(v_) + eps) + wd * p)
 
     m = jax.tree.map(first_moment, st.m, grads)
     v = jax.tree.map(second_moment, st.v, grads)
@@ -640,6 +762,7 @@ def _loss_fn(
     lam: float,
     decode_fn: DecodeFn | None,
     fb: jax.Array | None,
+    zs: jax.Array,
 ) -> jax.Array:
     """Computes the training loss for one batch.
 
@@ -651,6 +774,8 @@ def _loss_fn(
       lam: Weight on the field term. 0 omits it.
       decode_fn: Differentiable decoder for the field term, or `None`.
       fb: Field targets, shape `(B, N_x)`, or `None`.
+      zs: Per-mode latent scale the targets `zb` are divided by, shape
+        `(1, n_latent)`.
 
     Returns:
       The scalar loss.
@@ -664,7 +789,7 @@ def _loss_fn(
     if lam > 0.0 and decode_fn is not None:
         if fb is None:
             raise ValueError("the field loss term needs field targets")
-        loss = loss + lam * jnp.mean((decode_fn(z_hat) - fb) ** 2)
+        loss = loss + lam * jnp.mean((decode_fn(z_hat * zs) - fb) ** 2)
 
     return loss
 
@@ -677,6 +802,7 @@ def train_step(
     X: jax.Array,
     Z: jax.Array,
     F: jax.Array | None,
+    zs: jax.Array,
     batch: jax.Array,
     lr: float,
     cfg: SensorBranchConfig,
@@ -696,6 +822,8 @@ def train_step(
       X: Every sensor window, shape `(N_t, n_delays, n_channels)`.
       Z: Every latent target, shape `(N_t, n_latent)`.
       F: Every field target, shape `(N_t, N_x)`, or `None` when `lam` is 0.
+      zs: Per-mode latent scale the targets `Z` are divided by, shape
+        `(1, n_latent)`.
       batch: Indices selecting this batch.
       lr: Learning rate.
       cfg: Branch architecture.
@@ -712,7 +840,7 @@ def train_step(
     """
     xb, zb = X[batch], Z[batch]
     fb = F[batch] if F is not None else None
-    loss, grads = jax.value_and_grad(_loss_fn)(params, xb, zb, cfg, lam, decode_fn, fb)
+    loss, grads = jax.value_and_grad(_loss_fn)(params, xb, zb, cfg, lam, decode_fn, fb, zs)
     grads = _clip(grads, clip)
     params, opt_state = adam_update(params, grads, opt_state, lr, wd)
     return params, opt_state, loss
@@ -724,6 +852,7 @@ def eval_loss(
     X: jax.Array,
     Z: jax.Array,
     F: jax.Array | None,
+    zs: jax.Array,
     cfg: SensorBranchConfig,
     lam: float,
     decode_fn: DecodeFn | None,
@@ -735,6 +864,8 @@ def eval_loss(
       X: Sensor windows, shape `(N, n_delays, n_channels)`.
       Z: Latent targets, shape `(N, n_latent)`.
       F: Field targets, shape `(N, N_x)`, or `None`.
+      zs: Per-mode latent scale the targets `Z` are divided by, shape
+        `(1, n_latent)`.
       cfg: Branch architecture.
       lam: Weight on the field term.
       decode_fn: Differentiable decoder for the field term, or `None`.
@@ -745,7 +876,7 @@ def eval_loss(
     Raises:
       ValueError: If `lam` is above 0 with a decoder but `F` is `None`.
     """
-    return _loss_fn(params, X, Z, cfg, lam, decode_fn, F)
+    return _loss_fn(params, X, Z, cfg, lam, decode_fn, F, zs)
 
 
 def _epoch_batches(key: jax.Array, n: int, batch_size: int) -> jax.Array:
@@ -772,9 +903,6 @@ def _epoch_batches(key: jax.Array, n: int, batch_size: int) -> jax.Array:
 
 class _JaxLatent(Protocol):
     """An encoder and decoder pair that `BranchedAEJax` trains against.
-
-    A latent space that also defines `decode_jax`, as `LinearLatentJax` does,
-    supports `lambda_field` above 0.
 
     Attributes:
       n_latent: Dimension of the latent space.
@@ -813,9 +941,8 @@ class BranchedAEJax:
     select snapshots with an index array, because the sensor windows are causal.
 
     Attributes:
-      latent: A fitted `LinearLatentJax`, or any latent space with `encode`,
-        `decode`, and `n_latent`, plus `decode_jax` when `lambda_field` is above
-        0.
+      latent: A `LinearLatentJax` or `AutoencoderLatentJax`, or any latent space
+        with `encode`, `decode`, and `n_latent`.
       branch: Sensor branch architecture. One of `"linear"`, `"mlp"`, `"cnn"`,
         or `"gru"`. See `SensorBranchConfig`.
       n_delays: Causal window length in samples.
@@ -962,6 +1089,7 @@ class BranchedAEJax:
         Xj = jnp.asarray(W, dt)
         Zj = jnp.asarray(Z / self.z_scale, dt)
         Fj = jnp.asarray(Q.T, dt) if self.lambda_field > 0 else None
+        zsj = jnp.asarray(self.z_scale, dt)
 
         n_val = int(round(self.val_fraction * len(train_idx)))
         if len(train_idx) - n_val < 1:
@@ -1008,6 +1136,7 @@ class BranchedAEJax:
                         Xj,
                         Zj,
                         Fj,
+                        zsj,
                         batches[i],
                         lr,
                         cfg,
@@ -1029,6 +1158,7 @@ class BranchedAEJax:
                             Xj[va_i],
                             Zj[va_i],
                             Fj[va_i] if Fj is not None else None,
+                            zsj,
                             cfg,
                             self.lambda_field,
                             decode_fn,

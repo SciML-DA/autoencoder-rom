@@ -55,23 +55,6 @@ from scipy.signal import get_window
 from scipy.special import gammaincinv
 
 
-# ── optional project utilities ────────────────────────────────────────────────
-
-try:
-    from mpl_toolkits.axes_grid1 import ImageGrid
-    _HAS_IMAGEGRID = True
-except ImportError:
-    _HAS_IMAGEGRID = False
-
-try:
-    from pyts.image import RecurrencePlot
-    _HAS_PYTS = True
-except ImportError:
-    _HAS_PYTS = False
-
-
-
-
 def energy_fraction(Sigma):
     """
     Relative energy fraction and cumulative energy.

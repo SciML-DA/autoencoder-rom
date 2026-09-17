@@ -18,10 +18,11 @@ JAX.
 
 Typical usage example:
 
-  from field_estimation import PODLSE, delay_embed, split_train_test
+  from datasets import split_indices
+  from field_estimation import PODLSE, delay_embed
 
   Sd = delay_embed(S, n_delays=25)
-  tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)
+  tr, _, te = split_indices(Q.shape[1], val_frac=0, test_frac=0.25, gap=100, warmup=24)
   model = PODLSE(r_field=100, r_sensor=60, ridge=1e-4).fit(Q[:, tr], Sd[:, tr])
   model.score(Q[:, te], Sd[:, te])
 """
@@ -33,7 +34,7 @@ from .branched_ae import (
     SensorBranch,
     TorchLatent,
 )
-from .branched_ae_jax import BranchedAEJax, LinearLatentJax
+from .branched_ae_jax import AutoencoderLatentJax, BranchedAEJax, LinearLatentJax
 from .epod import (
     PODLSE,
     ExtendedPOD,
@@ -43,7 +44,6 @@ from .epod import (
     nmse,
     projection_floor,
     ridge_cv,
-    split_train_test,
 )
 from .epod_jax import ExtendedPODJax, PODLSEJax, pod_jax, ridge_cv_jax
 
@@ -55,6 +55,7 @@ __all__ = [
     "ridge_cv_jax",
     "BranchedAEJax",
     "LinearLatentJax",
+    "AutoencoderLatentJax",
     # Linear estimators.
     "PODLSE",
     "ExtendedPOD",
@@ -64,7 +65,6 @@ __all__ = [
     "projection_floor",
     "nmse",
     "ridge_cv",
-    "split_train_test",
     # Nonlinear estimators.
     "BranchedAE",
     "SensorBranch",

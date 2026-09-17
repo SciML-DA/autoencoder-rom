@@ -76,18 +76,19 @@ import numpy as np  # noqa: E402
 # `src` needs no insert: the editable install puts it on sys.path.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from experiments.april_wake.data_preprocessing import (  # noqa: E402
-    add_data_args,
-    band_limit,
-    load_data,
-    make_split,
-)
 from experiments.april_wake.case_reader import (  # noqa: E402
     F_PIV_HZ,
     RUNS,
     build_case,
     concat_cases,
 )
+from experiments.april_wake.data_preprocessing import (  # noqa: E402
+    add_data_args,
+    band_limit,
+    load_data,
+    make_split,
+)
+from field_estimation import plots as rp  # noqa: E402
 from field_estimation.branched_ae import (  # noqa: E402
     BranchedAE,
     LatentForecaster,
@@ -108,9 +109,7 @@ from field_estimation.epod import (  # noqa: E402
     pod,
     projection_floor,
     ridge_cv,
-    split_train_test,
 )
-from field_estimation import plots as rp  # noqa: E402
 
 CSV_FIELDS = [
     "tag",
@@ -127,20 +126,9 @@ CSV_FIELDS = [
     "nmse_train",
     "nmse_test",
     "nmse_latent",
-    # cos_test is the reference notebook's metric: the normalised inner product
-    # between the reconstruction and the truth, on the fluctuation. It is
-    # insensitive to amplitude, so a reconstruction with the right shape at half
-    # the amplitude scores ~1.0 on it and ~0.25 on NMSE -- energy_test is the
-    # companion that catches exactly that, being the amplitude ratio.
     "cos_test",
     "energy_test",
-    # Per-run test NMSE, each normalised by that run alone. Empty for a
-    # single-run job. This is the column to compare against a single-run
-    # headline; `nmse_test` pooled over runs is not comparable with one.
     "nmse_by_run",
-    # See sparse_sensor_sweep.py: with --band-hz, nmse_test scores the banded
-    # target the model was fitted to and this scores the same prediction against
-    # the unfiltered field. Quoting only the first lets banding flatter itself.
     "nmse_fullband",
     "floor_test",
     "fit_seconds",

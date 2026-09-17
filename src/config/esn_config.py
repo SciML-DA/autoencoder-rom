@@ -119,7 +119,6 @@ class ESNConfig:
     update_state: bool = True
     Wout_svd: bool = False
     training_data_filename: Optional[str] = None
-    plot_training: bool = False
 
     # Time parameters.
     dt: float = 0.1

@@ -3,7 +3,7 @@
 `POD_ESN` with the other forecaster, and the reason `_base._LatentROM` is
 parameterised rather than inherited. It exists mainly as the acceptance test for
 `LatentROMMixin` / `SensorPlacementMixin`: if swapping the forecaster had
-required changes inside the mixins, the `Forecaster` boundary would have been
+required changes inside the mixins, the forecaster boundary would have been
 drawn in the wrong place.
 
 It very nearly held. Two names had to be generalised -- `state_labels` assumed a
@@ -35,7 +35,6 @@ class POD_LSTM(_LatentROM, LatentROMMixin, SensorPlacementMixin, LSTM_model, POD
     _forecaster_cls = LSTM_model
     #: keep POD's historical \\Phi_j notation in figures rather than the generic z_j
     latent_symbol = "\\Phi"
-    figs_folder: str = "figs/POD-LSTM/"
 
     extra_print_params = [*LSTM_model.extra_print_params, "Nq", "measure_modes",
                           "N_modes"]

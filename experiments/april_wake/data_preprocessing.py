@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 from scipy import signal
 
-from field_estimation.epod import split_train_test
+from datasets import split_indices
 
 from .case_reader import RUNS, build_case, concat_cases
 
@@ -397,7 +397,7 @@ def make_split(args, n_t, run_id, cases):
     tr_parts, te_parts = [], []
     for k, (s0, e0) in zip(keys, bounds):
         n = e0 - s0
-        a, b = split_train_test(n, args.test_fraction, gap=gap, warmup=warmup)
+        a, _, b = split_indices(n, val_frac=0, test_frac=args.test_fraction, gap=gap, warmup=warmup)
         if cooldown:
             keep = n - cooldown
             a, b = a[a < keep], b[b < keep]

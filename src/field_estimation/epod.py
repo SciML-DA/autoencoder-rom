@@ -31,10 +31,11 @@ much of the field the sensors reach.
 
 Typical usage example:
 
-  from field_estimation.epod import PODLSE, delay_embed, split_train_test
+  from datasets import split_indices
+  from field_estimation.epod import PODLSE, delay_embed
 
   Sd = delay_embed(S, n_delays=25)
-  tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)
+  tr, _, te = split_indices(Q.shape[1], val_frac=0, test_frac=0.25, gap=100, warmup=24)
   model = PODLSE(r_field=100, r_sensor=60, ridge=1e-4).fit(Q[:, tr], Sd[:, tr])
   model.score(Q[:, te], Sd[:, te])
 """
@@ -49,7 +50,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 import numpy as np
 import numpy.typing as npt
 
-#: A real-valued array. Each parameter documents its own shape.
+#: A real-valued array
 FloatArray = npt.NDArray[np.floating[Any]]
 #: An index array selecting snapshots along the time axis.
 IndexArray = npt.NDArray[np.intp]
@@ -101,10 +102,6 @@ class _CVEstimator(Protocol):
         ...
 
 
-#: Builds a `_CVEstimator` from a `ridge` keyword argument and the keyword
-#: arguments `ridge_cv` forwards.
-EstimatorFactory = Callable[..., _CVEstimator]
-
 __all__ = [
     "cosine",
     "energy_ratio",
@@ -122,7 +119,6 @@ __all__ = [
     "nmse",
     "nmse_per_snapshot",
     "fluctuation_variance",
-    "split_train_test",
     "blocked_folds",
     "ridge_cv",
 ]
@@ -262,8 +258,8 @@ def delay_embed(S: FloatArray, n_delays: int = 1, stride: int = 1, n_ahead: int 
     `s_{t+stride}, ..., s_{t+n_ahead*stride}`.
 
     Embed the whole record once, before splitting. The first
-    `(n_delays - 1) * stride` columns are partly zero padding (pass that count as
-    `warmup` to `split_train_test` to exclude them).
+    `(n_delays - 1) * stride` columns are partly zero padding. To exclude them,
+    pass that count as `warmup` to `datasets.split_indices`.
 
     Args:
       S: Sensor record, shape `(N_s, N_t)`.
@@ -1154,43 +1150,7 @@ def energy_ratio(Q_true: FloatArray, Q_hat: FloatArray) -> float:
     return float(b / a) if a > 0 else float("nan")
 
 
-# ── Splitting ─────────────────────────────────────────────────────────────────
-
-
-def split_train_test(
-    n_t: int, test_fraction: float = 0.25, gap: int = 0, warmup: int = 0
-) -> tuple[IndexArray, IndexArray]:
-    """Splits a record into a contiguous training block and test block.
-
-    The test block is the end of the record. Set `gap` to at least the delay
-    window, so no test window reaches back into a training snapshot.
-
-    Args:
-      n_t: Number of snapshots in the record.
-      test_fraction: Fraction of the record held out for testing.
-      gap: Snapshots dropped between the training and test blocks.
-      warmup: Leading snapshots to drop. After `delay_embed`, set this to
-        `(n_delays - 1) * stride` to drop the partly zero-padded windows.
-
-    Returns:
-      The training indices and the test indices.
-
-    Raises:
-      ValueError: If `test_fraction` is outside `[0, 1)`, if `gap` or `warmup`
-        is negative, if `warmup` consumes the record, or if no training
-        snapshots remain.
-    """
-    if not 0.0 <= test_fraction < 1.0:
-        raise ValueError(f"test_fraction must be in [0, 1), got {test_fraction}")
-    if gap < 0 or warmup < 0:
-        raise ValueError(f"gap and warmup must be >= 0, got {gap}, {warmup}")
-    if warmup >= n_t:
-        raise ValueError(f"warmup={warmup} consumes the whole record (n_t={n_t})")
-    n_te = int(round(n_t * test_fraction))
-    n_tr = n_t - n_te - gap
-    if n_tr <= warmup:
-        raise ValueError(f"nothing left to train on: n_t={n_t}, gap={gap}, warmup={warmup}")
-    return np.arange(warmup, n_tr), np.arange(n_t - n_te, n_t)
+# ── Cross-validation ──────────────────────────────────────────────────────────
 
 
 def blocked_folds(idx: IndexArray, k: int = 5, gap: int = 0) -> Iterator[tuple[IndexArray, IndexArray]]:
@@ -1235,7 +1195,7 @@ def ridge_cv(
     ridges: tuple[float, ...] = (0.0, 1e-8, 1e-6, 1e-4, 1e-3, 1e-2, 1e-1, 1.0),
     k: int = 5,
     gap: int = 0,
-    estimator: EstimatorFactory | None = None,
+    estimator: Callable[..., _CVEstimator] | None = None,
     **kwargs: Any,
 ) -> tuple[float, dict[float, float]]:
     """Selects a ridge by blocked cross-validation within the training block.

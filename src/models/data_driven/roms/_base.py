@@ -21,10 +21,10 @@ Nothing else. `AE_ESN` is four lines, and adding a projector or a forecaster
 costs leaf declarations rather than another copy of the constructor.
 
 `POD_ESN` deliberately does not use this. It predates the whole projector x
-forecaster generalisation, is the class romda's side recognises, and carries
-plot/PDF logic none of the others have -- so it keeps its own constructor and
-only shares the mixins. Folding it in would change the construction path of the
-one ROM with results already on disk, for no structural gain.
+forecaster generalisation and is the class romda's side recognises, so it keeps
+its own constructor and only shares the mixins. Folding it in would change the
+construction path of the one ROM with results already on disk, for no structural
+gain.
 """
 
 from __future__ import annotations
@@ -78,7 +78,6 @@ class _LatentROM:
         skip_sensor_placement: bool = False,
         domain_of_measurement=None,
         down_sample_measurement=None,
-        plot_case: bool = False,
         **kwargs,
     ):
         """
@@ -143,7 +142,6 @@ class _LatentROM:
                 self,
                 data=phi_to_esn_layout(Z),
                 dt=dt,
-                plot_training=plot_case,
                 **kwargs,
             )
 
@@ -154,7 +152,7 @@ class _LatentROM:
             self.domain_of_measurement = domain_of_measurement  # type: ignore[attr-defined]
             self.down_sample_measurement = down_sample_measurement  # type: ignore[attr-defined]
             self.sensor_locations = self.define_sensors(
-                N_sensors=self.Nq, plot=plot_case, z0=self._z_mean
+                N_sensors=self.Nq, z0=self._z_mean
             )
             self.Nq = len(self.sensor_locations)
         else:

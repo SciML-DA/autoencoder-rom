@@ -37,9 +37,10 @@ Fit `E` and `D` on reconstruction first, then fit `G` against them.
 Typical usage example:
 
   from field_estimation.branched_ae import BranchedAE, LinearLatent
-  from field_estimation.epod import pod, split_train_test
+  from datasets import split_indices
+  from field_estimation.epod import pod
 
-  tr, te = split_train_test(Q.shape[1], 0.25, gap=100, warmup=24)
+  tr, _, te = split_indices(Q.shape[1], val_frac=0, test_frac=0.25, gap=100, warmup=24)
   Psi, _, _, q_mean = pod(Q[:, tr], r=64, subtract_mean=True, method="randomized")
   model = BranchedAE(LinearLatent(Psi, q_mean), branch="gru", n_delays=25).fit(Q, S, tr)
   model.score(Q, S, te)
@@ -1061,7 +1062,7 @@ class BranchedAE:
             raise ValueError(
                 f"train_idx starts at {train_idx.min()} but the {self.n_delays}-step "
                 f"window needs {self.warmup} samples of history. Pass "
-                f"warmup={self.warmup} to split_train_test."
+                f"warmup={self.warmup} to datasets.split_indices."
             )
         if not np.isfinite(S[:, train_idx]).all():
             raise ValueError("non-finite sensor values; interpolate dropouts first")

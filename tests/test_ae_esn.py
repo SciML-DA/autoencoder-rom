@@ -17,7 +17,7 @@ import sys
 
 import matplotlib
 
-matplotlib.use("Agg")  # placement plots must never block a headless run
+matplotlib.use("Agg")  # dynamodels and echostatenetwork import pyplot at import time
 
 import numpy as np
 import pytest
@@ -97,24 +97,6 @@ def test_decode_at_without_idx_is_full_decode(pod, data):
 
 
 # ---------------------------------------------------------------------------
-# The Forecaster protocol
-# ---------------------------------------------------------------------------
-
-def test_both_forecasters_satisfy_the_protocol():
-    """The protocol is ours, and only earns its place if the two forecasters
-    written independently of it both already satisfy it."""
-    from echostatenetwork import EchoStateNetwork
-
-    from models.data_driven.forecasters import LSTM
-
-    required = ("train", "step", "normalize_input", "compute_nRMSE", "copy",
-                "trained", "N_wash", "norm", "shift", "norm_method")
-    for cls in (EchoStateNetwork, LSTM):
-        missing = [m for m in required if not hasattr(cls, m)]
-        assert not missing, f"{cls.__name__} is missing {missing}"
-
-
-# ---------------------------------------------------------------------------
 # POD_ESN regression: the lift must not have moved anything
 # ---------------------------------------------------------------------------
 
@@ -159,7 +141,7 @@ def test_pod_sensor_placement_unchanged(data):
     case = POD_ESN(data=data, dt=0.01, n_modes=6, method="exact",
                    random_state=0, grid_shape=GRID, domain=DOMAIN, Nq=8, seed=0,
                    N_units=30, N_wash=5, N_func_evals=4, N_grid=2,
-                   perform_test=False, plot_case=False, train_ESN=False,
+                   perform_test=False, train_ESN=False,
                    skip_sensor_placement=True)
     case.domain_of_measurement = None
     case.down_sample_measurement = None
@@ -181,7 +163,7 @@ def test_autoencoder_rom_end_to_end(data, name):
     cls = getattr(dd, name)
     m = cls(data=data, dt=0.01, n_latent=6, grid_shape=GRID, domain=DOMAIN,
             Nq=8, seed=0, N_units=30, N_wash=5, N_func_evals=4, N_grid=2,
-            n_epochs=30, perform_test=False, plot_case=False)
+            n_epochs=30, perform_test=False)
 
     # the projector actually learned something
     Q = m.preprocess_snapshot(data)
@@ -220,7 +202,7 @@ def test_ntsa_protocol_surface(data, name):
 
     common = dict(data=data, dt=0.01, grid_shape=GRID, domain=DOMAIN, Nq=8,
                   seed=0, N_units=30, N_wash=5, N_func_evals=4, N_grid=2,
-                  perform_test=False, plot_case=False)
+                  perform_test=False)
     if name == "POD_ESN":
         m = dd.POD_ESN(n_modes=6, method="exact", random_state=0, **common)
     else:
@@ -242,7 +224,7 @@ def test_ntsa_protocol_surface(data, name):
 # Pass 4: the LSTM half of the matrix.
 #
 # These are the acceptance test for the mixins. If a forecaster swap needed
-# changes *inside* LatentROMMixin/SensorPlacementMixin, the Forecaster boundary
+# changes *inside* LatentROMMixin/SensorPlacementMixin, the forecaster boundary
 # would be in the wrong place -- so what matters is that these classes are
 # declarations and nothing more.
 # ---------------------------------------------------------------------------
@@ -255,7 +237,7 @@ def test_lstm_model_state_layout_and_step_contract(data):
 
     m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
                  grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-                 epochs=2, seq_len=50, plot_case=False)
+                 epochs=2, seq_len=50)
 
     assert m.Nphi == 6 + 2 * 16, "psi must be [latent ; h ; c]"
     psi, t = m.time_step(Nt=10)
@@ -278,7 +260,7 @@ def test_lstm_training_history_survives_model_init(data):
 
     m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
                  grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-                 epochs=2, seq_len=50, plot_case=False)
+                 epochs=2, seq_len=50)
     assert set(m.loss_history) == {"train", "val"}
     assert len(m.loss_history["train"]) > 0
     m.close()
@@ -293,7 +275,7 @@ def test_lstm_roms_reuse_the_mixins(data, name):
 
     cls = getattr(dd, name)
     kw = dict(data=data, dt=0.01, grid_shape=GRID, domain=DOMAIN, Nq=8,
-              N_units=16, N_wash=5, epochs=2, seq_len=50, plot_case=False)
+              N_units=16, N_wash=5, epochs=2, seq_len=50)
     kw |= (dict(n_modes=6, method="exact", random_state=0) if "POD" in name
            else dict(n_latent=6, n_epochs=20))
     m = cls(**kw)
@@ -315,7 +297,7 @@ def test_lstm_model_rejects_ensembles_explicitly(data):
 
     m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
                  grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-                 epochs=2, seq_len=50, plot_case=False)
+                 epochs=2, seq_len=50)
     m.psi0 = np.tile(m.psi0, (1, 3))  # pretend a 3-member ensemble
     m.update_history(m.psi0[np.newaxis], t=np.array([0.0]), reset=True)
     with pytest.raises(NotImplementedError, match="single-member"):

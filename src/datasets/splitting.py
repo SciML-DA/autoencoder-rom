@@ -46,59 +46,82 @@ def split_indices(
     val_frac: float = 0.2,
     test_frac: float = 0.2,
     gap: int = 50,
+    warmup: int = 0,
 ) -> tuple[Indices, Indices, Indices]:
-    """Divides a time axis into three contiguous blocks separated by a gap.
+    """Divides a time axis into contiguous blocks separated by a gap.
 
     The blocks lie in time order with a gap of `gap` discarded samples between
     them:
 
-      --[train]--gap--[val]--gap--[test]--
+      [warmup]--[train]--gap--[val]--gap--[test]
+
+    With `val_frac=0`, the validation block is empty and one gap separates the
+    training block from the test block:
+
+      [warmup]--[train]--gap--[test]
 
     Measure `gap` with `decorrelation_lag`.
 
     Args:
       n_t: Length of the time axis.
-      val_frac: Fraction of `n_t` to hold out for validation.
+      val_frac: Fraction of `n_t` to hold out for validation. 0 omits the
+        validation block.
       test_frac: Fraction of `n_t` to hold out for testing.
       gap: Samples to discard between blocks, so that neighboring blocks are
         statistically independent.
+      warmup: Leading samples to discard before the training block. After
+        `field_estimation.delay_embed`, set this to `(n_delays - 1) * stride`
+        to drop the partly zero-padded windows.
 
     Returns:
-      Train, validation, and test index arrays, in that order.
+      Train, validation, and test index arrays, in that order. The validation
+      array is empty when `val_frac` is 0.
 
     Raises:
-      ValueError: If `gap` is below 1, if the gaps and held-out fractions leave
-        no training samples, or if either held-out block comes out empty.
+      ValueError: If `gap` is below 1, if `warmup` is negative, if `val_frac` is
+        outside `[0, 1)` or `test_frac` is outside `(0, 1)`, if the warmup, gaps,
+        and held-out fractions leave no training samples, or if a held-out block
+        with a nonzero fraction comes out empty.
     """
     if gap < 1:
         raise ValueError(
             f"gap={gap} leaves the blocks adjacent, which is the leakage this "
             f"split prevents. Measure a gap with decorrelation_lag."
         )
+    if warmup < 0:
+        raise ValueError(f"warmup must be >= 0, got {warmup}")
+    if not 0.0 <= val_frac < 1.0:
+        raise ValueError(f"val_frac must be in [0, 1), got {val_frac}")
+    if not 0.0 < test_frac < 1.0:
+        raise ValueError(f"test_frac must be in (0, 1), got {test_frac}")
 
     n_test = int(round(test_frac * n_t))
     n_val = int(round(val_frac * n_t))
-    n_train = n_t - n_val - n_test - 2 * gap
+    n_gaps = 2 if val_frac > 0 else 1
+    a = n_t - n_val - n_test - n_gaps * gap
 
-    if n_train <= 0:
+    if a <= warmup:
         raise ValueError(
-            f"gap={gap} too large for n_t={n_t} at val_frac={val_frac}, "
-            f"test_frac={test_frac}; n_train would be {n_train}."
+            f"gap={gap} and warmup={warmup} too large for n_t={n_t} at "
+            f"val_frac={val_frac}, test_frac={test_frac}; n_train would be {a - warmup}."
         )
     # An empty validation or test block reaches `split_diagnostics`, where
     # `.min(1)` raises on a zero-length axis, far from the cause.
-    if n_val <= 0 or n_test <= 0:
+    if (val_frac > 0 and n_val <= 0) or n_test <= 0:
         raise ValueError(
             f"val_frac={val_frac} and test_frac={test_frac} give n_val={n_val}, "
-            f"n_test={n_test} at n_t={n_t}; both blocks must be non-empty."
+            f"n_test={n_test} at n_t={n_t}; a held-out block with a nonzero "
+            f"fraction must be non-empty."
         )
 
-    a = n_train
+    train = np.arange(warmup, a, dtype=np.intp)
+    if n_val == 0:
+        return train, np.empty(0, dtype=np.intp), np.arange(a + gap, n_t, dtype=np.intp)
+
     b = a + gap
     c = b + n_val
     d = c + gap
-
-    return np.arange(0, a), np.arange(b, c), np.arange(d, n_t)
+    return train, np.arange(b, c, dtype=np.intp), np.arange(d, n_t, dtype=np.intp)
 
 
 def decorrelation_lag(
@@ -298,9 +321,12 @@ def prepare_split(
       - `span_ceiling`: The `linear_span_ceiling` of the test block.
 
     Raises:
-      ValueError: If `X` holds too few snapshots to measure a lag, or if the
-        fractions and the measured gap leave a block empty.
+      ValueError: If `val_frac` is not positive, if `X` holds too few snapshots
+        to measure a lag, or if the fractions and the measured gap leave a block
+        empty.
     """
+    if val_frac <= 0:
+        raise ValueError(f"prepare_split needs a validation block; val_frac must be > 0, got {val_frac}")
     gap = decorrelation_lag(X, max_lag=max_lag, thresh=thresh, sub=sub)
     tr, va, te = split_indices(X.shape[1], val_frac=val_frac, test_frac=test_frac, gap=gap)
     X_train, X_val, X_test = X[:, tr], X[:, va], X[:, te]

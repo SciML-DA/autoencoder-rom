@@ -1,6 +1,5 @@
 import inspect
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.linalg as sla
 from dynamodels import DiscreteIntegrator, Model
@@ -67,9 +66,6 @@ class ESN_model(EchoStateNetwork, Model):
     def __init__(
         self,
         dt,
-        #  data_in: Optional[np.ndarray] = None,
-        #  y0: Optional[np.ndarray] = None,
-        #  plot_training=True,
         **kwargs,
     ):
         """
@@ -80,14 +76,12 @@ class ESN_model(EchoStateNetwork, Model):
                     Nt is the number of time steps (train + validate + test), and
                     Ndim is the number of dimensions of the system.
             - y0: initial state to initialize the ESN (if None, use first data point)
-            - plot_training: whether to plot or not the training data and training convergence.
             - Other ESN and Model parameters can be provided as keyword arguments,
                 e.g., N_units, N_wash, update_reservoir, update_state, etc.
         """
 
         data = kwargs.pop("data", None)
         y0 = kwargs.pop("y0", None)
-        plot_training = kwargs.pop("plot_training", True)
 
         # =================== STEP 1: EchoStateNetwork INITIALIZATION ======================
 
@@ -107,10 +101,7 @@ class ESN_model(EchoStateNetwork, Model):
         # Train the network if not already trained
         if not self.trained:
             print("Training ESN model...")
-            if plot_training:
-                self.plot_training_data(case=self, train_data=data, dt=dt)
-
-            self.train(train_data=data, plot_training=plot_training, **kwargs)
+            self.train(train_data=data, plot_training=False, **kwargs)
 
             # save validation data for initialization
             Y_wtv = self._split_and_format_data(data)[1]
@@ -366,18 +357,18 @@ class ESN_model(EchoStateNetwork, Model):
         `LatentROMMixin.reset_case`."""
         return self.reset_ESN(*args, **kwargs)
 
-    def reset_ESN(self, data, u0=None, plot_training=False, **kwargs):
+    def reset_ESN(self, data, u0=None, **kwargs):
 
         if u0 is None:
             u0 = self.reservoir_to_physical(self.reservoir_state)
 
-        EchoStateNetwork.__init__(self, y=u0, dt=self.dt, figs_folder=self.results_folder, **kwargs)
+        EchoStateNetwork.__init__(self, y=u0, dt=self.dt, **kwargs)
         # Train the network
         possible_args = inspect.getfullargspec(self.train)[0]
         train_args = {key: val for key, val in kwargs.items() if key in possible_args}
 
         # Train network
-        self.train(train_data=data, plot_training=plot_training, **train_args)
+        self.train(train_data=data, plot_training=False, **train_args)
 
         # Reset model class
         kwargs["psi0"] = self.build_psi()
@@ -519,259 +510,3 @@ class ESN_model(EchoStateNetwork, Model):
             r = r.squeeze(axis=0)
 
         return u, r
-
-    # ______________________________ Plotting functions ______________________________ #
-    @staticmethod
-    def plot_training_data(case, train_data, dt=None):
-        if train_data.ndim == 1:
-            train_data = train_data[np.newaxis, :, np.newaxis]
-        elif train_data.ndim == 2:
-            train_data = train_data[np.newaxis, :]
-
-        L, Nt, Ndim = train_data.shape
-        if dt is None:
-            dt = case.dt
-        t_data = np.arange(0, Nt) * dt
-        nrows = min(Ndim * L, 10)
-
-        _, axs = plt.subplots(nrows=nrows, ncols=1, figsize=(8, nrows), sharex=True, layout="constrained")
-        if nrows * L > 1 and isinstance(axs, np.ndarray):
-            axs = axs.T.flatten()
-        else:
-            axs = [axs]
-
-        for l, data_l in enumerate(train_data):
-            axs_dim = axs[l * Ndim : (l + 1) * Ndim]
-
-            for kk, ax in enumerate(axs_dim):
-                ax.plot(t_data, data_l[:, kk], lw=1.0, color="k")
-                ax.axvspan(
-                    0,
-                    case.t_train,
-                    facecolor="orange",
-                    alpha=0.3,
-                    zorder=-100,
-                    label="Train",
-                )
-                ax.axvspan(
-                    case.t_train,
-                    case.t_train + case.t_val,
-                    facecolor="red",
-                    alpha=0.3,
-                    zorder=-100,
-                    label="Validation",
-                )
-                ax.axvspan(
-                    case.t_train + case.t_val,
-                    case.t_train + case.t_val + case.t_test,
-                    facecolor="navy",
-                    alpha=0.2,
-                    zorder=-100,
-                    label="Test",
-                )
-
-                ax.legend(
-                    ncols=1,
-                    loc="upper left",
-                    bbox_to_anchor=(1.0, 1.0),
-                    frameon=False,
-                    title=f"L={l}, dim={kk}",
-                    fontsize="x-small",
-                    title_fontsize="small",
-                )
-        axs[-1].set(xlabel="time")
-        plt.show()
-
-    def visualize_config(self):
-        self.plot_Wout()
-
-        # pm = self  # shorthand
-
-        # if pm.hist.shape[0] > 1:
-
-        #     # Find global min and max for the color scale
-        #     vmin, vmax = np.min(pm.hist[:, pm.Nq:pm.Nq+pm.N_units, :]), np.max(pm.hist[:, pm.Nq:pm.Nq+pm.N_units, :])
-
-        #     fig1 = plt.figure(figsize=(8, 4), layout="constrained")
-        #     axs1 = fig1.subplots(pm.Nq, 1, sharey=True, sharex=True)
-        #     if pm.Nq == 1:
-        #         axs1 = np.array([axs1]) # type: ignore
-
-        #     y = pm.get_observable_hist() # history of the model observables (i.e., the physical state, not the reservoir state)
-        #     lbl = pm.obs_labels
-
-        #     norm_u = np.max(np.max(y[100:], axis=0, keepdims=True), axis=-1, keepdims=True).T - np.min(np.min(y[100:], axis=0, keepdims=True), axis=-1, keepdims=True).T
-        #     u = (y - np.mean(y, axis=0, keepdims=True)) / (0.5*norm_u)
-
-        #     # Choose a colormap
-        #     cmap = get_cmap('tab10', pm.m)
-
-        #     for ii, ax in enumerate(axs1):
-        #         [ax.plot(pm.hist_t, u[:, ii, mi], c=cmap(mi)) for mi in range(pm.m)]
-        #         ax.set(ylabel=lbl[ii])
-
-        #     fig1.legend([f'$mi={mi}$' for mi in range(pm.m)], loc='center left', bbox_to_anchor=(1.0, .5), ncol=1, frameon=False)
-
-        #     for ti in [10, 50, 75, 100]:
-        #         for ax in axs1:
-        #             ax.set(xlim=[-.01, pm.hist_t[ti]+.01], ylim=[-1, 1])
-        #             ax.axvline(pm.hist_t[ti], c='k', ls='--')
-
-        #         fig = plt.figure(figsize=(12, 8), layout="constrained")
-        #         axs = fig.subplots(1, 2, width_ratios=(pm.Nq, pm.N_units), sharey=True)  # type: ignore
-
-        #         im1 = axs[0].imshow(u[ti].T, cmap='RdBu', vmin=-1, vmax=1)
-        #         axs[0].set(title=f'physical state', ylabel='m_i', xlabel='u_i norm.')
-
-        #         im2 = axs[1].imshow(pm.hist[ti, pm.Nq:pm.Nq+pm.N_units, :].T, cmap='PuOr', vmin=vmin, vmax=vmax)
-        #         axs[1].set(title=f'reservoir state', xlabel='r_i')
-        #         fig.colorbar(im2, ax=axs, orientation='vertical', shrink=0.2)
-        # fig.colorbar(im1, ax=axs, orientation='vertical', shrink=0.2)
-
-    def visualize_spatiotemporal_hist(self, y_hist=None, t=None, averaged=False, **kwargs):
-
-        if y_hist is None:
-            n_t = int(self.t_CR // self.dt)
-            y_hist = self.hist[-n_t:, : self.Nphi]
-
-        if t is None:
-            t = self.hist_t[-len(y_hist) :]
-
-        if y_hist.shape[1] > self.N_dim:
-            y_hist_list = [
-                y_hist[:, : self.N_dim],
-                y_hist[:, self.N_dim : self.N_dim + self.N_units],
-            ]
-            titles = ["Physical state", "Reservoir state"]
-            labels = [
-                self.state_labels[: self.N_dim],
-                self.state_labels[self.N_dim : self.N_dim + self.N_units],
-            ]
-            cmaps = ["RdBu_r", "PRGn"]
-        else:
-            y_hist_list = [y_hist]
-            titles = ["Physical state"]
-            labels = [self.state_labels[: self.N_dim]]
-            cmaps = ["RdBu_r"]
-
-        if not averaged:
-            nrows_kw = kwargs.get("nrows", None)
-            if nrows_kw is None:
-                nrows = min(10, y_hist.shape[-1])
-            else:
-                nrows = int(nrows_kw)
-
-            for y_hist, ttl, lbl, cmap in zip(y_hist_list, titles, labels, cmaps):
-                fig, axs = plt.subplots(nrows=nrows, figsize=(10, 1.5 * nrows), sharey=True, sharex=True)
-                axs_arr = np.atleast_1d(axs).ravel()
-                lim = np.max(abs(y_hist))
-                im = None
-
-                for mi, ax in zip(range(nrows), axs_arr):
-                    im = ax.imshow(
-                        y_hist[:, :, mi].T,
-                        aspect="auto",
-                        origin="lower",
-                        cmap=cmap,
-                        vmin=-lim,
-                        vmax=lim,
-                        extent=[t[0], t[-1], 0, y_hist.shape[1]],
-                    )
-
-                axs_arr[0].set(title=rf"ESN_model {ttl} spatiotemporal evolution. $N_\text{{units}}={self.N_units}$")
-                axs_arr[-1].set(xlabel="$t$")
-                ytx = np.arange(len(lbl)) + 0.5
-                if len(lbl) > 6:
-                    lbl, ytx = [zz[:: len(lbl) // 5] for zz in (lbl, ytx)]
-
-                [ax.set(yticks=ytx, yticklabels=lbl) for ax in axs_arr]
-                assert im is not None
-                fig.colorbar(im, ax=axs_arr.tolist(), orientation="vertical", shrink=1 / nrows)
-        else:
-            for y_hist, ttl, lbl, cmap in zip(y_hist_list, titles, labels, cmaps):
-                # Averaged ensemble visualization
-                y_mean_hist = np.mean(y_hist, axis=-1)
-
-                fig, axs = plt.subplots(nrows=2, figsize=(10, 6), sharex=True)
-
-                # Mean evolution
-                lim_mean = np.max(abs(y_mean_hist))
-                im0 = axs[0].imshow(
-                    y_mean_hist.T,
-                    aspect="auto",
-                    origin="lower",
-                    cmap=cmap,
-                    vmin=-lim_mean,
-                    vmax=lim_mean,
-                    extent=[t[0], t[-1], 0, y_hist.shape[1]],
-                )
-                axs[0].set(title=rf"{ttl} spatiotemporal evolution (mean and std). $N_\text{{units}}={self.N_units}$")
-                fig.colorbar(im0, ax=axs[0], orientation="vertical")
-
-                # Deviation covariance evolution
-
-                var_ensemble = np.var(y_hist, axis=-1, ddof=1).T  # (Nt, Nx)
-                var_ensemble = np.sqrt(var_ensemble)  # Standard deviation
-
-                lim_dev = np.max(abs(var_ensemble))
-                im1 = axs[1].imshow(
-                    var_ensemble,  # Plot covariance of deviations
-                    aspect="auto",
-                    origin="lower",
-                    cmap="magma",
-                    vmin=0,
-                    vmax=lim_dev,
-                    extent=[t[0], t[-1], 0, y_hist.shape[1]],
-                )
-
-                fig.colorbar(im1, ax=axs[1], orientation="vertical")
-                # Add ticks and labels
-
-                ytx = np.arange(len(lbl)) + 0.5
-                if len(lbl) > 6:
-                    lbl, ytx = [zz[:: len(lbl) // 5] for zz in (lbl, ytx)]
-
-                axs[1].set(xlabel="$t$")
-                [ax.set(yticks=ytx, yticklabels=lbl) for ax in axs]
-
-    def plot_Wout(self):
-
-        if not self.Wout_svd:
-            # Visualize the output matrix
-            fig, ax = plt.subplots()
-            im = ax.matshow(
-                self.Wout.T,
-                cmap="PRGn",
-                aspect=4.0,
-                vmin=-np.max(self.Wout),
-                vmax=np.max(self.Wout),
-            )
-            ax.tick_params(axis="x", bottom=True, top=False, labelbottom=True, labeltop=False)
-            plt.colorbar(im, orientation="horizontal", extend="both")
-            ax.set(ylabel="$N_u$", xlabel="$N_r$", title="$\\mathbf{W}_\\mathrm{out}$")
-
-        else:
-            fig, axs = plt.subplots(1, 4, figsize=(15, 15), width_ratios=[1, 1, 1, 1])
-            eigs = self.Wout_Sigma
-            if eigs.ndim > 2:
-                eigs = np.mean(eigs, axis=0)
-
-            Wout = np.dot(self.Wout_U, np.dot(eigs, self.Wout_Vh))
-
-            for W, ax, title in zip(
-                [Wout, self.Wout_U, eigs, self.Wout_Vh],
-                axs,
-                [
-                    "$\\bar{\\mathbf{W_{out}}} = $",
-                    "$\\mathbf{U}$",
-                    "$\\bar{\\Sigma}$",
-                    "$\\mathbf{V}^\\mathrm{T}$",
-                ],
-            ):
-                cmap = "PuOr"
-                im = ax.imshow(W, cmap=cmap, vmin=-np.max(W), vmax=np.max(W))
-                ax.set(title=title)
-                # set the same colorbar for all the matrices
-                fig.colorbar(im, ax=ax, shrink=0.9, orientation="horizontal")
-
-        return fig

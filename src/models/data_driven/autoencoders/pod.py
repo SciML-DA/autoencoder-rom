@@ -25,8 +25,8 @@ class POD(Projector):
     Snapshot POD.
 
     Inherits the shared interface from ``Projector`` (fit/encode/decode/
-    reconstruct/score/copy/N_latent) and adds linear-specific attributes,
-    geometry helpers, and plotting utilities.
+    reconstruct/score/copy/N_latent) and adds linear-specific attributes
+    and geometry helpers.
 
     Two solvers are available via ``method``:
 
@@ -186,9 +186,7 @@ class POD(Projector):
                 random_state=self.random_state,
             )
         else:
-            raise ValueError(
-                f"Unknown method '{self.method}'. " "Choose 'exact' or 'randomized'."
-            )
+            raise ValueError(f"Unknown method '{self.method}'. Choose 'exact' or 'randomized'.")
 
     # ── Projector interface ────────────────────────────────────────────────────
 
@@ -207,9 +205,9 @@ class POD(Projector):
         self.Sigma = result[0]
         self.Psi = result[1]
         self.Phi = result[2]
-        assert (
-            self._Sigma is not None and self._Psi is not None and self._Phi is not None
-        ), "Decomposition must return Sigma, Psi, Phi."
+        assert self._Sigma is not None and self._Psi is not None and self._Phi is not None, (
+            "Decomposition must return Sigma, Psi, Phi."
+        )
         self.N_latent = self.Sigma.shape[0]
         self.fitted = True
         return self
@@ -309,9 +307,7 @@ class POD(Projector):
     def truncate(self, n_modes: int) -> POD:
         """Truncate to the first n_modes modes in-place."""
         if n_modes >= self.N_latent:
-            print(
-                f"Requested n_modes={n_modes} >= N_latent={self.N_latent}. No truncation applied."
-            )
+            print(f"Requested n_modes={n_modes} >= N_latent={self.N_latent}. No truncation applied.")
             return self
         self.Psi = self.Psi[:, :n_modes]
         self.Phi = self.Phi[:n_modes, :]
@@ -342,18 +338,14 @@ class POD(Projector):
         try:
             if original_data.ndim == 2:
                 return original_data[self.indices_to_original_grid]
-            return original_data[
-                :, self.indices_to_original_grid[0], self.indices_to_original_grid[1]
-            ]
+            return original_data[:, self.indices_to_original_grid[0], self.indices_to_original_grid[1]]
         except Exception:
             raise ValueError("Pass original_data in shape [(Nu) x Nx x Ny x (Nt)].")
 
     # ── metrics ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def compute_MSE(
-        ROM_data: np.ndarray, original_data: np.ndarray, time_evolution: bool = False
-    ):
+    def compute_MSE(ROM_data: np.ndarray, original_data: np.ndarray, time_evolution: bool = False):
         """Mean Squared Error between ROM reconstruction and original data."""
         ROM_data, original_data = POD.flatten(ROM_data, original_data)
         original_data[np.isnan(original_data)] = 0.0
@@ -412,9 +404,7 @@ class SPOD(POD):
         domain: Optional[list] = None,
         **kwargs,
     ):
-        super().__init__(
-            n_modes=n_modes, grid_shape=grid_shape, domain=domain, **kwargs
-        )
+        super().__init__(n_modes=n_modes, grid_shape=grid_shape, domain=domain, **kwargs)
         self.Nf = Nf
         self.filter_kind = filter_kind
         self._n_modes_requested = n_modes  # None = keep all after fit

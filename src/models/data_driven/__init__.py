@@ -1,9 +1,9 @@
-"""Data-driven reduced-order models: a `Projector` crossed with a `Forecaster`.
+"""Data-driven reduced-order models: a `Projector` crossed with a forecaster.
 
 Three subpackages, one per role:
 
     ``autoencoders/``  the projectors -- `Projector`, POD/SPOD, AE/CAE, the JAX pair
-    ``forecasters/``   the forecasters -- `Forecaster`, `ESN_model`, `LSTM_model`
+    ``forecasters/``   the forecasters -- `ESN_model`, `LSTM`, `LSTM_model`
     ``roms/``          the assembled models -- POD/AE/CAE x ESN/LSTM
 
 plus `latent_rom`, the projector- and forecaster-agnostic plumbing the ROMs
@@ -31,7 +31,7 @@ exactly as usual::
 """
 
 from . import autoencoders, forecasters, roms
-from .forecasters import LSTM, ESN_model, Forecaster, LSTM_model, phi_to_esn_layout
+from .forecasters import LSTM, ESN_model, LSTM_model, phi_to_esn_layout
 from .latent_rom import LatentROMMixin, SensorPlacementMixin
 from .roms import POD_ESN, POD_LSTM
 
@@ -53,7 +53,6 @@ __all__ = [
     "AE_LSTM",
     "CAE_LSTM",
     # the projector x forecaster plumbing these are built from
-    "Forecaster",
     "LatentROMMixin",
     "SensorPlacementMixin",
 ]

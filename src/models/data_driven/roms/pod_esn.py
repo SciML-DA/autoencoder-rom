@@ -1,10 +1,7 @@
-from typing import Optional
-
 from ..autoencoders import POD
 from ..forecasters import ESN_model
 from ..latent_rom import LatentROMMixin, SensorPlacementMixin
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
@@ -24,9 +21,6 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
         - Sigma: POD Sigmas [N_modes, ],  note: Lambdas can be computed as: Sigma = np.sqrt(Lambda)
     """
 
-    # name: str = 'POD-ESN'
-    figs_folder: str = "figs/POD-ESN/"
-
     Nq = 10
 
     perform_test = False  # Wether to perform testing of the ESN model
@@ -42,8 +36,6 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
         self,
         data,
         dt,
-        plot_case=False,
-        pdf_file=None,
         skip_sensor_placement=False,
         train_ESN=True,
         domain_of_measurement=None,
@@ -55,8 +47,6 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
 
         Args:
             - data  (np.ndarray): Data to be used for the POD decomposition and ESN training  [ (Nu, N_t, Nx, Ny) or (N_t, Ndim*Nx*Ny) ]
-            - plot_case (bool, optional): Whether to plot the case. Defaults to True.
-            - pdf_file (None or str, optional): Whether to save the plot case. If a string is provided, it is used as the filename. Defaults to None.
             - skip_sensor_placement (bool, optional): Whether to skip sensor placement. Defaults to False.
             - train_ESN (bool, optional): Whether to train the ESN. Defaults to True.
             - **kwargs: Additional keyword arguments to configure the parent classes Model/ESN/POD.
@@ -85,7 +75,7 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
                 Phi = Phi[np.newaxis, ...]
 
             Phi = Phi.transpose(0, 2, 1)  # must be LxNtxNdim for ESN
-            ESN_model.__init__(self, data=Phi, dt=dt, plot_training=plot_case, **kwargs)
+            ESN_model.__init__(self, data=Phi, dt=dt, **kwargs)
 
         # __________________________ Select sensors ___________________________ #
         if self.measure_modes or skip_sensor_placement:
@@ -98,29 +88,6 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
         else:
             # If the sensors are already defined, use them
             self.Nq = len(self.sensor_locations)
-
-        if plot_case:
-            rec = self.reconstruct(X=data[:, -1])
-            rec = self._to_physical_grid(rec)
-            err = np.sqrt((rec - data[:, -1]) ** 2) / np.nanmax(data[:, -1] ** 2)
-            datasets = {
-                "Input": data[:, -1],
-                f"POD {self.N_modes} modes": rec,
-                "Error": err,
-            }
-
-            POD_ESN.plot_case(case=self, num_modes=self.N_modes, datasets=datasets)
-
-            if pdf_file is not None:
-                from plotting.figures import add_pdf_page, plt_pdf
-
-                self.pdf_file = pdf_file
-                if isinstance(self.pdf_file, str):
-                    self.pdf_file = plt_pdf.PdfPages(f"{self.pdf_file}.pdf")
-
-                figs = [plt.figure(ii) for ii in plt.get_fignums()]
-                for fig in figs:
-                    add_pdf_page(self.pdf_file, fig_to_add=fig, close_figs=True)
 
         print("========= POD-ESN model complete =========")
 
@@ -149,28 +116,3 @@ class POD_ESN(LatentROMMixin, SensorPlacementMixin, ESN_model, POD):
     def latent_training_trajectory(self):
         """Latent coefficients the ESN was trained on -- POD's `Phi`, (r, N_t)."""
         return self.Phi
-
-    # ========================================== PLOTS =======================================================
-
-    @staticmethod
-    def plot_case(case, datasets: Optional[dict] = None, num_modes=None):
-
-        from plotting.pod import (
-            plot_modes,
-            plot_time_coefficients,
-            plot_spectrum,
-            plot_flows_rms,
-        )
-
-        if num_modes is None:
-            num_modes = case.N_modes
-
-        plot_modes(case=case, num_modes=num_modes, cmap="viridis", n_col=2)
-        plot_time_coefficients(case=case, num_modes=num_modes)
-        plot_spectrum(case=case, max_mode=num_modes)
-
-        if datasets is not None:
-            display_sensors = case.sensor_locations is not None
-            plot_flows_rms(
-                case=case, datasets=datasets, display_sensors=display_sensors
-            )

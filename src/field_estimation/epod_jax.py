@@ -48,7 +48,6 @@ from .epod import (
     nmse,
     projection_floor,
     sensor_stats,
-    split_train_test,
 )
 
 jax.config.update("jax_enable_x64", True)
@@ -70,7 +69,6 @@ __all__ = [
     "delay_embed",
     "nmse",
     "projection_floor",
-    "split_train_test",
 ]
 
 

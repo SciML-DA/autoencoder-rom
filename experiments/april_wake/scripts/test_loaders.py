@@ -40,6 +40,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter  # noqa: E402
 # `src` needs no insert: the editable install puts it on sys.path.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
+from datasets import split_indices  # noqa: E402
 from experiments.april_wake.case_reader import (  # noqa: E402
     F_PIV_HZ,
     find_force_files,
@@ -49,7 +50,7 @@ from experiments.april_wake.case_reader import (  # noqa: E402
     read_dat,
     sync_forces,
 )
-from field_estimation.epod import PODLSE, nmse, pod, split_train_test  # noqa: E402
+from field_estimation.epod import PODLSE, nmse, pod  # noqa: E402
 
 # ── data ──────────────────────────────────────────────────────────────────────
 
@@ -243,7 +244,7 @@ def main():
     # 250 Hz consecutive snapshots are nearly identical, so a randomly held-out
     # frame has near-copies of itself in the training set and the score is
     # meaningless.
-    tr, te = split_train_test(Q.shape[1], test_fraction=0.25, gap=args.gap)
+    tr, _, te = split_indices(Q.shape[1], val_frac=0, test_frac=0.25, gap=args.gap)
     print(f"\nsplit: train {tr[0]}..{tr[-1]} ({len(tr)}), test {te[0]}..{te[-1]} ({len(te)}), gap {args.gap}")
 
     print(f"\nfitting POD-LSE (r_field={args.r_field}, r_sensor={args.r_sensor}, ridge={args.ridge:g}) ...")

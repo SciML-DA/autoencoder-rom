@@ -17,14 +17,13 @@ from __future__ import annotations
 
 import json
 import os
-
-import pytest
 import shutil
 import subprocess
 import sys
 import tempfile
 
 import numpy as np
+import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # the rig-specific entry points live with the experiment they belong to
@@ -34,6 +33,7 @@ SCRIPTS = os.path.join(REPO, "experiments", "april_wake", "scripts")
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "src"))
 
+from datasets import split_indices  # noqa: E402
 from experiments.april_wake import case_reader as we  # noqa: E402
 from field_estimation.branched_ae import (  # noqa: E402
     BranchedAE,
@@ -53,7 +53,6 @@ from field_estimation.epod import (  # noqa: E402
     nmse,
     pod,
     projection_floor,
-    split_train_test,
 )
 
 # The end-to-end checks shell out to the study and sweep scripts and take
@@ -309,7 +308,7 @@ def test_error_grows_with_sensor_noise(v):
     errs = []
     for snr in (60, 40, 20, 10):
         c = toy(response="linear", snr_db=snr, seed=1)
-        tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40)
+        tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40)
         m = PODLSE(r_field=c["rank"], r_sensor=8, ridge=1e-4).fit(c["Q"][:, tr], c["S"][:, tr])
         errs.append(m.score(c["Q"][:, te], c["S"][:, te]))
     ok = all(b > a for a, b in zip(errs, errs[1:]))
@@ -326,7 +325,7 @@ def test_linear_floor_under_nonlinearity(v):
     out = {}
     for resp in ("linear", "quadratic"):
         c = toy(response=resp, seed=2)
-        tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40)
+        tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40)
         m = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
         out[resp] = m.score(c["Q"][:, te], c["S"][:, te])
     ok = out["linear"] < 1e-10 < out["quadratic"]
@@ -353,7 +352,7 @@ def test_observability_is_one_for_linear_sensors(v):
 def test_projection_floor_bounds_every_estimator(v):
     """No estimator using a basis can score below that basis's truncation error."""
     c = toy(response="quadratic", seed=3)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40)
     r = 3
     Psi, _, _, qm = pod(c["Q"][:, tr], r, subtract_mean=True)
     floor = projection_floor(c["Q"][:, te], Psi, qm)
@@ -386,7 +385,7 @@ def test_delay_embed_raises_rank(v):
     Lagged copies raise that ceiling, and the score has to fall accordingly.
     """
     c = toy(response="linear", n_sensors=3, rank=6, seed=4)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=60, warmup=20)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=60, warmup=20)
     inst = PODLSE(r_field=6, r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e0 = inst.score(c["Q"][:, te], c["S"][:, te])
     Sd = delay_embed(c["S"], 21)
@@ -406,7 +405,7 @@ def test_no_leakage(v):
     """
     c = toy(response="quadratic", n_t=1500, seed=5)
     n = c["Q"].shape[1]
-    tr, te = split_train_test(n, 0.25, gap=60)
+    tr, _, te = split_indices(n, val_frac=0, test_frac=0.25, gap=60)
     m = PODLSE(r_field=c["rank"], r_sensor=None, ridge=1e-6).fit(c["Q"][:, tr], c["S"][:, tr])
     contig = m.score(c["Q"][:, te], c["S"][:, te])
 
@@ -471,7 +470,7 @@ def test_branched_linear_matches_podlse(v):
     the preprocessing, not a training-length issue.
     """
     c = toy(response="quadratic", seed=6)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=40, warmup=0)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=40, warmup=0)
     Psi, _, _, qm = pod(c["Q"][:, tr], c["rank"], subtract_mean=True)
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e_closed = closed.score(c["Q"][:, te], c["S"][:, te])
@@ -506,7 +505,7 @@ def test_branch_beats_the_linear_floor(v):
     succeed on the experiment.
     """
     c = toy(response="quadratic", n_t=2000, seed=7)
-    tr, te = split_train_test(c["Q"].shape[1], 0.25, gap=60, warmup=0)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=60, warmup=0)
     Psi, _, _, qm = pod(c["Q"][:, tr], c["rank"], subtract_mean=True)
     lat = LinearLatent(Psi, qm, device="cpu")
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
@@ -548,6 +547,108 @@ def test_torch_latent_wraps_an_autoencoder(v):
     d = np.abs(b.T * scale[:, None] + ae.Q_mean - a).max() / np.abs(a).max()
     ok = d < 1e-5 and F.shape == (c["Q"].shape[1], c["Q"].shape[0]) and Z.shape[0] == 4
     assert ok, f"decode_torch vs decode {d:.1e}, latent {Z.shape}"
+
+
+def test_autoencoder_latent_jax_wraps_both_autoencoders(v):
+    """AutoencoderLatentJax(AEJax / CAEJax) decodes to the same field the projector does."""
+    import jax.numpy as jnp
+
+    from field_estimation import AutoencoderLatentJax
+    from models.data_driven.autoencoders import AEJax, CAEJax
+
+    c = toy(n_t=400, n_x=16, n_y=12, rank=4)
+    X = _grid(c)
+    for p in (
+        AEJax(n_latent=4, hidden=(32,), n_epochs=20, dtype=jnp.float64, seed=0),
+        CAEJax(n_latent=4, channels=(4, 8), n_epochs=20, dtype=jnp.float64, seed=0),
+    ):
+        p.fit(X)
+        lat = AutoencoderLatentJax(p, dtype="float64")
+        Z = lat.encode(c["Q"])
+        a = lat.decode(Z)
+        b = np.asarray(lat.decode_jax(jnp.asarray(Z.T))).T
+        d = np.abs(b - a).max() / np.abs(a).max()
+        if v:
+            print(f"      {type(p).__name__}: decode_jax vs decode {d:.1e}")
+        assert Z.shape == (4, c["Q"].shape[1]) and d < 1e-10, f"{type(p).__name__}: {d:.1e}"
+
+    with pytest.raises(ValueError, match="fitted"):
+        AutoencoderLatentJax(AEJax(n_latent=4))
+
+
+def test_branched_jax_trains_with_an_autoencoder_field_term(v):
+    """BranchedAEJax takes the field term through an AEJax decoder."""
+    import jax.numpy as jnp
+
+    from field_estimation import AutoencoderLatentJax, BranchedAEJax
+    from models.data_driven.autoencoders import AEJax
+
+    c = toy(response="quadratic", n_t=600, n_x=16, n_y=12, rank=4)
+    tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=20)
+    ae = AEJax(n_latent=4, hidden=(32,), n_epochs=20, dtype=jnp.float64, seed=0).fit(_grid(c))
+
+    losses = {}
+    for lam in (0.0, 0.1):
+        m = BranchedAEJax(AutoencoderLatentJax(ae), branch="mlp", n_delays=1, lambda_field=lam, n_epochs=30, seed=0)
+        m.fit(c["Q"], c["S"], tr)
+        assert np.isfinite(m.score(c["Q"], c["S"], te))
+        losses[lam] = m.loss_history[-1]
+    if v:
+        print(f"      final loss without field term {losses[0.0]:.6f}, with {losses[0.1]:.6f}")
+    assert losses[0.0] != losses[0.1], "the field term did not enter the loss"
+
+
+def test_branched_jax_field_term_decodes_unscaled_codes(v):
+    """With latent_weight="unit", the field term decodes z_hat * z_scale, not z_hat."""
+    import jax
+    import jax.numpy as jnp
+
+    from field_estimation.branched_ae_jax import (
+        LinearLatentJax,
+        SensorBranchConfig,
+        branch_forward,
+        eval_loss,
+        init_branch,
+    )
+
+    c = toy(n_t=200, rank=4)
+    Psi, _, _, qm = pod(c["Q"], 4, subtract_mean=True)
+    lat = LinearLatentJax(Psi, qm, dtype="float64")
+    cfg = SensorBranchConfig(n_channels=3, n_delays=2, n_latent=4, dtype="float64")
+    params = init_branch(jax.random.PRNGKey(0), cfg)
+    X = jnp.asarray(np.random.default_rng(0).standard_normal((50, 2, 3)))
+    zs = jnp.asarray([[0.5, 2.0, 3.0, 0.1]])
+
+    Z = branch_forward(params, X, cfg)  # a perfect prediction of the scaled targets
+    F = lat.decode_jax(Z * zs)  # the fields those codes stand for
+    loss = float(eval_loss(params, X, Z, F, zs, cfg, 1.0, lat.decode_jax))
+    if v:
+        print(f"      loss at a perfect prediction {loss:.1e}")
+    assert loss < 1e-20, f"{loss:.1e}"
+
+
+def test_jax_float32_stays_float32_with_x64(v):
+    """Training keeps float32 parameters float32 when jax_enable_x64 is on."""
+    import jax
+    import jax.numpy as jnp
+
+    from field_estimation import BranchedAEJax, LinearLatentJax
+    from models.data_driven.autoencoders import AEJax, CAEJax
+
+    assert jax.config.jax_enable_x64, "field_estimation enables x64 on import"
+    c = toy(n_t=300, n_x=16, n_y=12, rank=4)
+    X = _grid(c)
+    Psi, _, _, qm = pod(c["Q"], 4, subtract_mean=True)
+    models = {
+        "AEJax": AEJax(n_latent=4, hidden=(16,), n_epochs=2, dtype=jnp.float32).fit(X),
+        "CAEJax": CAEJax(n_latent=4, channels=(4, 8), n_epochs=2, dtype=jnp.float32).fit(X),
+        "BranchedAEJax": BranchedAEJax(LinearLatentJax(Psi, qm), n_delays=1, n_epochs=2).fit(
+            c["Q"], c["S"], np.arange(200)
+        ),
+    }
+    for name, m in models.items():
+        dtypes = {str(a.dtype) for a in jax.tree.leaves(m.params)}
+        assert dtypes == {"float32"}, f"{name} params are {dtypes}"
 
 
 def test_forecaster_beats_persistence(v):
