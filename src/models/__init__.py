@@ -11,9 +11,9 @@ as ``models/{model,history,integrator}.py``; those copies had drifted from
 upstream and were removed in favour of the released package.
 
 No ``sys.modules`` aliases are set for the old module paths: nothing in this
-repository pickles model instances (``config/esn_config.py`` saves plain arrays
-via ``np.savez_compressed``), so there are no stored class paths to keep
-resolvable.
+repository pickles model instances. ``config/model_config.py`` saves plain arrays
+via ``np.savez_compressed`` and records class paths under the current module
+names only.
 """
 
 import dynamodels

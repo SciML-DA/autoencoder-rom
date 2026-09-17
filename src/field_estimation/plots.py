@@ -1,18 +1,9 @@
-# pyright: strict
-# `F`, `G`, `T`, `P`, and `E` are fields by the linear-algebra convention this
-# codebase uses, not module constants.
-# pyright: reportConstantRedefinition=false
-#
-# Matplotlib's stubs leave `**kwargs` untyped on almost every drawing method,
-# such as `imshow`, `plot`, and `savefig`, so those methods resolve to
-# partially unknown types. Every binding this module owns is annotated.
-# pyright: reportUnknownMemberType=false
 """Plots for estimating a flow field from sparse sensors.
 
 Draws POD spectra, linear observability, extended POD modes, method comparisons,
 per-snapshot error, forecast error against horizon, and an animation of the
 reconstruction. Every function takes plain arrays rather than estimator objects,
-so results from `PODLSE`, `ExtendedPOD`, and `BranchedAE` pass through the same
+so results from `PODLSE` and `BranchedAE` pass through the same
 functions and share one color scale.
 
 This module doesn't select a matplotlib backend; set one, such as `Agg`, before

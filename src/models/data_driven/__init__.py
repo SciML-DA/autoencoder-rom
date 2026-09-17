@@ -1,72 +1,75 @@
-"""Data-driven reduced-order models: a `Projector` crossed with a forecaster.
+"""Data-driven reduced-order models.
 
-Three subpackages, one per role:
+A latent ROM pairs a projector, which reduces flow snapshots to latent
+coefficients, with a forecaster, which advances those coefficients in time.
 
-    ``autoencoders/``  the projectors -- `Projector`, POD/SPOD, AE/CAE, the JAX pair
-    ``forecasters/``   the forecasters -- `ESN_model`, `LSTM`, `LSTM_model`
-    ``roms/``          the assembled models -- POD/AE/CAE x ESN/LSTM
+    autoencoders/   projectors: POD, SPOD, AE, CAE, AEJax, CAEJax
+    forecasters/    forecasters: ESN_model, LSTM, LSTM_model
+    roms/           ROMs: POD, AE, and CAE, each with ESN or LSTM
+    latent_rom.py   LatentROM, the base class the ROMs share
 
-plus `latent_rom`, the projector- and forecaster-agnostic plumbing the ROMs
-share (`LatentROMMixin`, `SensorPlacementMixin`).
+This package re-exports the forecasters and ROMs. Importing it imports neither
+torch nor JAX; `AE_ESN`, `CAE_ESN`, `AE_LSTM`, and `CAE_LSTM` load their modules
+on first access.
 
-``autoencoders/`` is romda's own name and grouping; ``forecasters/`` and
-``roms/`` are the symmetric ones added here, and are on the agenda to discuss
-with A. Nóvoa rather than something her structure already prescribes.
+Typical usage example:
 
-Everything is re-exported at this level, so the historical import paths still
-read the same::
+  from models.data_driven import POD_ESN
 
-    from models.data_driven import POD_ESN, AE_ESN, ESN_model
-
-Import boundary
----------------
-`AE_ESN`, `CAE_ESN`, `AE_LSTM` and `CAE_LSTM` are resolved lazily. Importing
-them pulls in torch (via `autoencoders.ae`), and eager exports here would drag
-torch into every ``import models`` -- including the POD-only paths that the
-projector package deliberately keeps torch-free. Naming them still works
-exactly as usual::
-
-    from models.data_driven import AE_ESN     # imports torch, as it must
-    from models.data_driven import POD_ESN    # does not
+  rom = POD_ESN(data=X, dt=0.01, n_modes=10, Nq=8)
+  psi, t = rom.time_integrate(Nt=100)
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 from . import autoencoders, forecasters, roms
 from .forecasters import LSTM, ESN_model, LSTM_model, phi_to_esn_layout
-from .latent_rom import LatentROMMixin, SensorPlacementMixin
+from .latent_rom import LatentROM
 from .roms import POD_ESN, POD_LSTM
 
 __all__ = [
-    # subpackages
-    "autoencoders",
-    "forecasters",
-    "roms",
-    # forecasters
-    "ESN_model",
-    "LSTM_model",
+    "AE_ESN",
+    "AE_LSTM",
+    "CAE_ESN",
+    "CAE_LSTM",
     "LSTM",
-    "phi_to_esn_layout",
-    # the ROMs
     "POD_ESN",
     "POD_LSTM",
-    "AE_ESN",
-    "CAE_ESN",
-    "AE_LSTM",
-    "CAE_LSTM",
-    # the projector x forecaster plumbing these are built from
-    "LatentROMMixin",
-    "SensorPlacementMixin",
+    "ESN_model",
+    "LSTM_model",
+    "LatentROM",
+    "autoencoders",
+    "forecasters",
+    "phi_to_esn_layout",
+    "roms",
 ]
 
-#: torch-backed ROMs, deferred to `roms` (which defers to `autoencoders`)
 _LAZY = ("AE_ESN", "CAE_ESN", "AE_LSTM", "CAE_LSTM")
 
 
-def __getattr__(name: str):
-    """PEP 562 lazy access -- keeps torch off the POD-only import path."""
+def __getattr__(name: str) -> Any:
+    """Loads an autoencoder ROM the first time it is accessed.
+
+    Args:
+      name: Attribute name.
+
+    Returns:
+      The named ROM class.
+
+    Raises:
+      AttributeError: If the package exports no attribute called `name`.
+    """
     if name in _LAZY:
         return getattr(roms, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
+    """Lists the package's exports.
+
+    Returns:
+      The names in `__all__`, sorted.
+    """
     return sorted(__all__)

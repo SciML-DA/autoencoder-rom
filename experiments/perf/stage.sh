@@ -20,7 +20,11 @@ for f in autoencoders.py autoencoders_jax.py pod_spod.py; do
 done
 : > "$STAGE/impls/ae_orig/__init__.py"
 
-rsync -a --delete --exclude __pycache__ "$ROOT/src/models/data_driven/autoencoders/" "$STAGE/impls/ae_new/"
+# The new autoencoders import `training` and `configurable` from their parent package.
+mkdir -p "$STAGE/impls/ae_new"
+: > "$STAGE/impls/ae_new/__init__.py"
+cp "$ROOT/src/models/data_driven/training.py" "$ROOT/src/models/data_driven/configurable.py" "$STAGE/impls/ae_new/"
+rsync -a --delete --exclude __pycache__ "$ROOT/src/models/data_driven/autoencoders/" "$STAGE/impls/ae_new/autoencoders/"
 rsync -a --delete --exclude __pycache__ "$ROOT/src/datasets/" "$STAGE/src/datasets/"
 cp "$ROOT/experiments/perf/bench.py" "$ROOT/experiments/perf/bench_t4.slr" "$ROOT/experiments/perf/bench_a40.slr" "$STAGE/"
 

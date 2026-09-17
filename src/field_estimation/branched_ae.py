@@ -1,14 +1,3 @@
-# pyright: strict
-# `Q`, `S`, `W`, `Z`, and `G` are matrices and operators by the linear-algebra
-# convention this codebase uses, not module constants.
-# pyright: reportConstantRedefinition=false
-#
-# Torch annotates part of its API incompletely: `torch.manual_seed`,
-# `Optimizer.step`, `Tensor.backward`, and `Module.__init__` resolve to partially
-# unknown types. Every binding this module owns is annotated explicitly.
-#
-# pyright: reportUnknownMemberType=false
-
 """Two-branch autoencoder for reconstructing a flow field from sparse sensors.
 
 Adds a sensor branch `G` to a trained encoder and decoder pair, mapping sensor
@@ -314,8 +303,15 @@ class _Autoencoder(Protocol):
 class _DenseAutoencoder(_Autoencoder, Protocol):
     """The members of a fitted dense `AE` that `TorchLatent` reads."""
 
-    encoder: nn.Module
-    decoder: nn.Module
+    @property
+    def encoder(self) -> nn.Module:
+        """The encoder network."""
+        ...
+
+    @property
+    def decoder(self) -> nn.Module:
+        """The decoder network."""
+        ...
 
 
 class _ConvAutoencoder(_Autoencoder, Protocol):
@@ -323,8 +319,16 @@ class _ConvAutoencoder(_Autoencoder, Protocol):
 
     grid_shape: tuple[int, int, int] | None
     fluid_mask_flat: npt.NDArray[np.bool_] | None
-    dec_fc: nn.Module
-    dec_conv: nn.Module
+
+    @property
+    def dec_fc(self) -> nn.Module:
+        """The linear map from the latent space to the bottleneck grid."""
+        ...
+
+    @property
+    def dec_conv(self) -> nn.Module:
+        """The transposed-convolution decoder stages."""
+        ...
 
     def networks(self) -> list[nn.Module]:
         """Lists every network the projector trains.
@@ -376,7 +380,7 @@ class TorchLatent(LatentSpace):
     Puts the projector's networks in evaluation mode. It doesn't train them;
     `BranchedAE` with `finetune_decoder=True` does. A `CAE` decoder emits a
     grid, so this class builds a gather index once to map the grid onto the flat
-    `(N_fluid * Nu, N_t)` layout in torch.
+    `(Nu * N_fluid, N_t)` layout in torch.
 
     Args:
       projector: A fitted `AE` or `CAE`.
@@ -415,12 +419,12 @@ class TorchLatent(LatentSpace):
     def _build_gather(self) -> torch.Tensor:
         """Builds the index that maps the decoder's grid onto the flat layout.
 
-        The flat layout is `(N_fluid, Nu)` in row-major order, so entry
-        `f * Nu + u`. The decoder emits `(B, Nu, Nx, Ny)`, which flattens to
-        entry `u * (Nx * Ny) + p`.
+        The flat layout groups rows by component, so row `u * N_fluid + f`
+        holds component `u` at the `f`-th fluid point. The decoder emits
+        `(B, Nu, Nx, Ny)`, which flattens to entry `u * (Nx * Ny) + p`.
 
         Returns:
-          Gather indices into the flattened grid, shape `(N_fluid * Nu,)`.
+          Gather indices into the flattened grid, shape `(Nu * N_fluid,)`.
 
         Raises:
           ValueError: If the projector has no grid shape or fluid mask.
@@ -431,7 +435,7 @@ class TorchLatent(LatentSpace):
 
         Nu, Nx, Ny = p.grid_shape
         pos = np.flatnonzero(p.fluid_mask_flat)
-        idx = (np.arange(Nu)[None, :] * (Nx * Ny) + pos[:, None]).ravel()
+        idx = (np.arange(Nu)[:, None] * (Nx * Ny) + pos[None, :]).ravel()
 
         return torch.as_tensor(idx, dtype=torch.long, device=self.device)
 

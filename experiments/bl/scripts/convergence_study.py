@@ -218,7 +218,8 @@ def evaluate_model(
 
     # n_epochs_run is the epoch the loop broke on, which is `patience` epochs
     # after the model actually peaked
-    val_hist = list(getattr(model, "val_loss_history", []))
+    history = getattr(model, "training_history", None)
+    val_hist = list(history.val) if history is not None else []
     best_epoch = int(np.argmin(val_hist)) + 1 if val_hist else np.nan
 
     return {
@@ -233,11 +234,11 @@ def evaluate_model(
         "gen_gap": test_rel_error / train_rel_error if train_rel_error > 0 else np.nan,
         "fit_time_s": float(fit_time),
         "n_params": float(getattr(model, "n_params", np.nan)),
-        "n_epochs_run": float(getattr(model, "n_epochs_run", np.nan)),
+        "n_epochs_run": float(history.n_epochs_run) if history is not None else np.nan,
         "best_epoch": float(best_epoch),
-        "history_train": list(getattr(model, "loss_history", [])),
+        "history_train": list(history.train) if history is not None else [],
         "history_val": val_hist,
-        "history_lr": list(getattr(model, "lr_history", [])),
+        "history_lr": list(history.lr) if history is not None else [],
     }
 
 

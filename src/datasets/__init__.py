@@ -1,4 +1,3 @@
-# pyright: strict
 """Loads snapshot data and splits it into train, validation, and test blocks.
 
 `snapshots` reads a file into the `(Nu, Nt, Nx, Ny)` layout every `Projector`

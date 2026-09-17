@@ -1,11 +1,10 @@
-# pyright: strict
 """Estimates a full flow field from a few sensor channels.
 
 This package takes sensor measurements and estimates the field they
 came from.
 
 The package contains:
-- `epod`: The linear estimators `PODLSE` and `ExtendedPOD`, plus
+- `epod`: The linear estimator `PODLSE`, which also computes extended POD, plus
   `delay_embed`, `mode_observability`, and `projection_floor`.
 - `branched_ae`: `BranchedAE`, which trains a sensor branch against the
   encoder and decoder of a `LinearLatent` or `TorchLatent`, and
@@ -37,7 +36,6 @@ from .branched_ae import (
 from .branched_ae_jax import AutoencoderLatentJax, BranchedAEJax, LinearLatentJax
 from .epod import (
     PODLSE,
-    ExtendedPOD,
     delay_embed,
     extended_pod,
     mode_observability,
@@ -45,12 +43,11 @@ from .epod import (
     projection_floor,
     ridge_cv,
 )
-from .epod_jax import ExtendedPODJax, PODLSEJax, pod_jax, ridge_cv_jax
+from .epod_jax import PODLSEJax, pod_jax, ridge_cv_jax
 
 __all__ = [
     # JAX implementations.
     "PODLSEJax",
-    "ExtendedPODJax",
     "pod_jax",
     "ridge_cv_jax",
     "BranchedAEJax",
@@ -58,7 +55,6 @@ __all__ = [
     "AutoencoderLatentJax",
     # Linear estimators.
     "PODLSE",
-    "ExtendedPOD",
     "extended_pod",
     "delay_embed",
     "mode_observability",

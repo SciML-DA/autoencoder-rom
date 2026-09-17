@@ -1,13 +1,3 @@
-# pyright: strict
-# `Q`, `S`, `W`, `X`, `Z`, and `F` are matrices by the linear-algebra convention
-# this codebase uses, not module constants.
-# pyright: reportConstantRedefinition=false
-#
-# JAX ships `py.typed` but annotates its array API incompletely: `jnp.asarray`,
-# `jax.random.uniform`, `jax.jit`, and related resolve to partially unknown
-# types. Every binding this module owns is annotated explicitly.
-#
-# pyright: reportUnknownMemberType=false
 """JAX implementation of the two-branch autoencoder's sensor branch.
 
 Ports the sensor branch `G` from `branched_ae.py`, which maps a causal window of

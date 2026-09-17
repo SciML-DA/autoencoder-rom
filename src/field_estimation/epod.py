@@ -1,8 +1,3 @@
-# pyright: strict
-# `Q`, `B`, `C`, `S`, `Psi`, `G`, and friends are matrices by the linear-algebra
-# convention this codebase uses, not module constants.
-# pyright: reportConstantRedefinition=false
-
 """Linear baselines for estimating a flow field from sparse sensors.
 
 Implements snapshot POD, extended POD (Borée 2003), and POD with linear
@@ -21,8 +16,8 @@ ridge-regularized map between their coefficients:
     M       = B C.T (C C.T + lam I)^-1
     phi_hat = Psi M Phi.T s_new
 
-`ExtendedPOD` computes the same estimator without truncating the field, and
-agrees with `PODLSE(r_field=None)`.
+With `r_field=None` and `sensor_basis="pod"`, `PODLSE` skips the field POD
+and computes extended POD (Borée 2003), which gives the same estimate.
 
 A linear estimator reconstructs into the column space of `Psi M Phi.T`, whose
 rank is at most `r_sensor`, and `r_sensor` is at most `N_s`. `delay_embed`
@@ -45,7 +40,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 import numpy as np
 import numpy.typing as npt
@@ -106,7 +101,6 @@ __all__ = [
     "cosine",
     "energy_ratio",
     "PODLSE",
-    "ExtendedPOD",
     "pod",
     "lse_map",
     "extended_pod",
@@ -512,19 +506,310 @@ def lse_map(B: FloatArray, C: FloatArray, ridge: float = 0.0, rcond: float = 1e-
     return np.linalg.solve(G, (B @ C.T).T).T
 
 
-# ── Sensor preprocessing ──────────────────────────────────────────────────────
+# ── POD-LSE ───────────────────────────────────────────────────────────────────
 
 
-class _SensorMixin:
-    """Sensor preprocessing and state checks shared by the linear estimators."""
+def _pls_directions(B: FloatArray, C: FloatArray, r: int | None) -> FloatArray:
+    """Ranks sensor directions by cross-covariance with the field.
 
-    if TYPE_CHECKING:
-        # The dataclass subclasses declare these fields. A class-level
-        # annotation here would become a constructor field of each subclass.
-        standardise_sensors: bool
-        s_mean: FloatArray
-        s_scale: FloatArray
-        fitted: bool
+    Takes the right singular vectors of `B @ C.T`. That matrix has rank at most
+    `r_field`, so when `r` asks for more directions, the rest come from the
+    sensor POD of the residual left after projecting out the ranked ones.
+
+    Args:
+      B: Field POD coefficients, shape `(r_field, N_t)`.
+      C: Standardized sensor record, shape `(N_s, N_t)`.
+      r: Directions to keep. `None` keeps all `N_s`.
+
+    Returns:
+      The basis, shape `(N_s, r)`, with orthonormal columns.
+    """
+    n_s = C.shape[0]
+    k = n_s if r is None else min(int(r), n_s)
+
+    G = B @ C.T
+    _, _, Vt = np.linalg.svd(G, full_matrices=False)
+    V = Vt.T
+    k0 = min(V.shape[1], k)
+    if k <= k0:
+        return np.ascontiguousarray(V[:, :k])
+
+    V = V[:, :k0]
+    C_perp = C - V @ (V.T @ C)
+    U, _, _ = np.linalg.svd(C_perp, full_matrices=False)
+    extra = U[:, : k - k0]
+    return np.ascontiguousarray(np.hstack([V, extra]))
+
+
+@dataclass
+class PODLSE:
+    """Estimates a field from synchronized sparse sensors by POD-LSE.
+
+    With `r_field=None` and `sensor_basis="pod"`, skips the field POD and
+    computes extended POD (Borée 2003): one extended field mode per sensor mode,
+
+        psi_ext_j = Q_c c_j / (||c_j||^2 + lam)       Psi_ext (N_x, r_s)
+        Q_hat     = Psi_ext C_new + q_mean
+
+    which equals POD-LSE with every field mode kept. `encode`, `project`,
+    `floor`, and `observability` need the field POD, so they raise in that mode.
+
+    Attributes:
+      r_field: POD modes kept for the field. `None` keeps all of them. Values
+        above `r_sensor` add little, because the map produces at most `r_sensor`
+        independent directions.
+      r_sensor: Sensor directions kept. `None` keeps all `N_s`.
+      sensor_basis: How the sensor directions are ranked before truncation.
+        `"pod"` ranks them by sensor variance. `"pls"` ranks them by
+        cross-covariance with the field, from the SVD of `B @ C.T`.
+      ridge: Tikhonov parameter, relative to the mean sensor coefficient energy.
+      standardise_sensors: Divide each channel by its training standard
+        deviation before the sensor decomposition.
+      pod_method: Algorithm `pod` uses for the field.
+      seed: Random seed, forwarded to `pod`.
+      Psi: Field modes, shape `(N_x, r_field)`, learned by `fit`. Empty for
+        extended POD.
+      Sigma: Field singular values, shape `(r_field,)`, learned by `fit`. Empty
+        for extended POD.
+      B: Field coefficients on the training block, learned by `fit`. Empty for
+        extended POD.
+      Phi: Sensor directions, shape `(N_s, r_sensor)`, learned by `fit`.
+      C: Sensor coefficients on the training block, learned by `fit`.
+      M: Map from sensor coefficients to field coefficients, learned by `fit`.
+        Empty for extended POD.
+      Psi_ext: Extended modes, shape `(N_x, r_sensor)`, learned by `fit` for
+        extended POD. Empty otherwise.
+      q_mean: Field mean, shape `(N_x, 1)`, learned by `fit`.
+      s_mean: Per-channel sensor mean, learned by `fit`.
+      s_scale: Per-channel sensor scale, learned by `fit`.
+      fitted: Whether `fit` has completed.
+    """
+
+    r_field: int | None = None
+    r_sensor: int | None = None
+    sensor_basis: str = "pod"
+    ridge: float = 0.0
+    standardise_sensors: bool = True
+    pod_method: str = "svd"
+    seed: int = 0
+
+    # ── Learned state ──
+    Psi: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    Sigma: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    B: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    Phi: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    C: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    M: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    Psi_ext: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    q_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    s_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    s_scale: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
+    fitted: bool = False
+
+    # ── API ──
+
+    @property
+    def extended(self) -> bool:
+        """Whether `fit` computes extended POD instead of a field POD."""
+        return self.r_field is None and self.sensor_basis == "pod"
+
+    def fit(self, Q: FloatArray, S: FloatArray) -> PODLSE:
+        """Fits the sensor basis, then the field basis and map or the extended modes.
+
+        Args:
+          Q: Field snapshots, shape `(N_x, N_t)`.
+          S: Synchronized sensor record, shape `(N_s, N_t)`.
+
+        Returns:
+          This estimator, fitted.
+
+        Raises:
+          ValueError: If `sensor_basis` is unknown, if `Q` and `S` hold different
+            numbers of snapshots, if either holds non-finite values, or if a
+            rank or ridge option is out of range.
+        """
+        if self.sensor_basis not in ("pod", "pls"):
+            raise ValueError(f"sensor_basis must be 'pod' or 'pls', got {self.sensor_basis!r}")
+        if self.ridge < 0:
+            raise ValueError(f"ridge must be >= 0, got {self.ridge}")
+        Q = np.asarray(Q, np.float64)
+        S = np.asarray(S, np.float64)
+        self._check_pair(Q, S)
+        empty = np.empty(0)
+
+        if self.extended:
+            self.q_mean = Q.mean(axis=1, keepdims=True)
+            Sc, self.s_mean, self.s_scale = self._prep_sensors(S, learn=True)
+            self.Phi, _, self.C, _ = pod(Sc, self.r_sensor, subtract_mean=False)
+            # The rows of `C` are orthogonal, so `C C.T` is diagonal and the
+            # least-squares solve reduces to a division per mode.
+            norms: FloatArray = np.einsum("kt,kt->k", self.C, self.C)
+            self.Psi_ext = ((Q - self.q_mean) @ self.C.T) / (norms + self._lam(self.C))
+            self.Psi = self.Sigma = self.B = self.M = empty
+            self.fitted = True
+            return self
+
+        self.Psi, self.Sigma, self.B, self.q_mean = pod(
+            Q, self.r_field, subtract_mean=True, method=self.pod_method, seed=self.seed
+        )
+
+        Sc, self.s_mean, self.s_scale = self._prep_sensors(S, learn=True)
+        if self.sensor_basis == "pod":
+            self.Phi, _, self.C, _ = pod(Sc, self.r_sensor, subtract_mean=False)
+        else:
+            self.Phi = _pls_directions(self.B, Sc, self.r_sensor)
+            self.C = self.Phi.T @ Sc
+
+        self.M = lse_map(self.B, self.C, self._lam(self.C))
+        self.Psi_ext = empty
+        self.fitted = True
+        return self
+
+    def _lam(self, C: FloatArray) -> float:
+        """Scales `ridge` by the mean sensor coefficient energy.
+
+        Args:
+          C: Sensor coefficients, shape `(r_s, N_t)`.
+
+        Returns:
+          The Tikhonov parameter in the units `lse_map` expects.
+        """
+        energy: FloatArray = np.einsum("kt,kt->k", C, C)
+        return self.ridge * float(np.mean(energy))
+
+    def coefficients(self, S_new: FloatArray) -> FloatArray:
+        """Projects sensor data onto the fitted sensor basis.
+
+        Args:
+          S_new: Sensor record, shape `(N_s, N_t)`.
+
+        Returns:
+          Sensor coefficients, shape `(r_sensor, N_t)`.
+
+        Raises:
+          RuntimeError: If `fit` has not been called.
+        """
+        self._check_fitted()
+        Sc, _, _ = self._prep_sensors(np.asarray(S_new, np.float64), learn=False)
+        return self.Phi.T @ Sc
+
+    def predict(self, S_new: FloatArray) -> FloatArray:
+        """Reconstructs fields from sensor data.
+
+        Args:
+          S_new: Sensor record, shape `(N_s, N_t)`.
+
+        Returns:
+          The reconstructed field, shape `(N_x, N_t)`.
+
+        Raises:
+          RuntimeError: If `fit` has not been called.
+        """
+        if self.Psi_ext.size:
+            return self.Psi_ext @ self.coefficients(S_new) + self.q_mean
+        return self.Psi @ self.encode(S_new) + self.q_mean
+
+    def encode(self, S_new: FloatArray) -> FloatArray:
+        """Predicts field POD coefficients from sensor data.
+
+        Args:
+          S_new: Sensor record, shape `(N_s, N_t)`.
+
+        Returns:
+          Predicted field POD coefficients, shape `(r_field, N_t)`.
+
+        Raises:
+          RuntimeError: If `fit` has not been called, or if it computed extended
+            POD.
+        """
+        self._check_field_basis("encode")
+        return self.M @ self.coefficients(S_new)
+
+    def score(self, Q_true: FloatArray, S_new: FloatArray) -> float:
+        """Returns the normalized MSE of the reconstruction.
+
+        Args:
+          Q_true: True field snapshots, shape `(N_x, N_t)`.
+          S_new: Synchronized sensor record, shape `(N_s, N_t)`.
+
+        Returns:
+          Normalized MSE. 0 is a perfect reconstruction; 1 matches predicting the
+          temporal mean.
+
+        Raises:
+          RuntimeError: If `fit` has not been called.
+        """
+        return nmse(np.asarray(Q_true, np.float64), self.predict(S_new))
+
+    def project(self, Q: FloatArray) -> FloatArray:
+        """Projects field data onto the fitted basis.
+
+        Args:
+          Q: Field snapshots, shape `(N_x, N_t)`.
+
+        Returns:
+          True field POD coefficients, shape `(r_field, N_t)`, which are what
+          `encode` predicts.
+
+        Raises:
+          RuntimeError: If `fit` has not been called, or if it computed extended
+            POD.
+        """
+        self._check_field_basis("project")
+        return self.Psi.T @ (np.asarray(Q, np.float64) - self.q_mean)
+
+    def floor(self, Q_true: FloatArray) -> float:
+        """Returns the best NMSE this field basis allows, independent of sensors.
+
+        Equals the truncation error of `Psi` on `Q_true`, so no estimator using
+        this basis scores below it.
+
+        Args:
+          Q_true: Field snapshots, shape `(N_x, N_t)`.
+
+        Returns:
+          The projection floor, as a normalized MSE.
+
+        Raises:
+          RuntimeError: If `fit` has not been called, or if it computed extended
+            POD.
+          ValueError: If `Q_true` has a different row count from `Psi`.
+        """
+        self._check_field_basis("floor")
+        return projection_floor(Q_true, self.Psi, self.q_mean)
+
+    def observability(self) -> Observability:
+        """Measures the observability of the fitted field basis from the sensors.
+
+        Returns:
+          The result of `mode_observability` for the fitted field and sensor
+          coefficients.
+
+        Raises:
+          RuntimeError: If `fit` has not been called, or if it computed extended
+            POD.
+        """
+        self._check_field_basis("observability")
+        return mode_observability(self.B, self.C)
+
+    def _check_field_basis(self, method: str) -> None:
+        """Raises if the estimator has no fitted field POD.
+
+        Args:
+          method: Name of the calling method, for the error message.
+
+        Raises:
+          RuntimeError: If `fit` has not been called, or if it computed extended
+            POD.
+        """
+        self._check_fitted()
+        if not self.Psi.size:
+            raise RuntimeError(f"{method}() needs a field POD; set r_field or sensor_basis='pls'")
+
+    @property
+    def n_params(self) -> int:
+        """Number of free parameters in the coefficient map or extended modes, or 0 before `fit`."""
+        return int(self.Psi_ext.size or self.M.size)
 
     def _prep_sensors(self, S: FloatArray, learn: bool) -> tuple[FloatArray, FloatArray, FloatArray]:
         """Centers and scales a sensor record.
@@ -582,437 +867,6 @@ class _SensorMixin:
                 "non-finite values in the training data. Drop the disc-mask "
                 "points from Q and interpolate or drop sensor dropouts first."
             )
-
-
-# ── POD-LSE ───────────────────────────────────────────────────────────────────
-
-
-def _pls_directions(B: FloatArray, C: FloatArray, r: int | None) -> FloatArray:
-    """Ranks sensor directions by cross-covariance with the field.
-
-    Takes the right singular vectors of `B @ C.T`. That matrix has rank at most
-    `r_field`, so when `r` asks for more directions, the rest come from the
-    sensor POD of the residual left after projecting out the ranked ones.
-
-    Args:
-      B: Field POD coefficients, shape `(r_field, N_t)`.
-      C: Standardized sensor record, shape `(N_s, N_t)`.
-      r: Directions to keep. `None` keeps all `N_s`.
-
-    Returns:
-      The basis, shape `(N_s, r)`, with orthonormal columns.
-    """
-    n_s = C.shape[0]
-    k = n_s if r is None else min(int(r), n_s)
-
-    G = B @ C.T
-    _, _, Vt = np.linalg.svd(G, full_matrices=False)
-    V = Vt.T
-    k0 = min(V.shape[1], k)
-    if k <= k0:
-        return np.ascontiguousarray(V[:, :k])
-
-    V = V[:, :k0]
-    C_perp = C - V @ (V.T @ C)
-    U, _, _ = np.linalg.svd(C_perp, full_matrices=False)
-    extra = U[:, : k - k0]
-    return np.ascontiguousarray(np.hstack([V, extra]))
-
-
-@dataclass
-class PODLSE(_SensorMixin):
-    """Estimates a field from synchronized sparse sensors by POD-LSE.
-
-    Attributes:
-      r_field: POD modes kept for the field. `None` keeps all of them. Values
-        above `r_sensor` add little, because the map produces at most `r_sensor`
-        independent directions.
-      r_sensor: Sensor directions kept. `None` keeps all `N_s`.
-      sensor_basis: How the sensor directions are ranked before truncation.
-        `"pod"` ranks them by sensor variance. `"pls"` ranks them by
-        cross-covariance with the field, from the SVD of `B @ C.T`.
-      ridge: Tikhonov parameter, relative to the mean sensor coefficient energy.
-      standardise_sensors: Divide each channel by its training standard
-        deviation before the sensor decomposition.
-      pod_method: Algorithm `pod` uses for the field.
-      seed: Random seed, forwarded to `pod`.
-      Psi: Field modes, shape `(N_x, r_field)`, learned by `fit`.
-      Sigma: Field singular values, shape `(r_field,)`, learned by `fit`.
-      B: Field coefficients on the training block, learned by `fit`.
-      Phi: Sensor directions, shape `(N_s, r_sensor)`, learned by `fit`.
-      C: Sensor coefficients on the training block, learned by `fit`.
-      M: Map from sensor coefficients to field coefficients, learned by `fit`.
-      q_mean: Field mean, shape `(N_x, 1)`, learned by `fit`.
-      s_mean: Per-channel sensor mean, learned by `fit`.
-      s_scale: Per-channel sensor scale, learned by `fit`.
-      fitted: Whether `fit` has completed.
-    """
-
-    r_field: int | None = None
-    r_sensor: int | None = None
-    sensor_basis: str = "pod"
-    ridge: float = 0.0
-    standardise_sensors: bool = True
-    pod_method: str = "svd"
-    seed: int = 0
-
-    # ── Learned state ──
-    Psi: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    Sigma: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    B: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    Phi: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    C: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    M: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    q_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    s_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    s_scale: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    fitted: bool = False
-
-    # ── API ──
-
-    def fit(self, Q: FloatArray, S: FloatArray) -> PODLSE:
-        """Fits the field basis, the sensor basis, and the map between them.
-
-        Args:
-          Q: Field snapshots, shape `(N_x, N_t)`.
-          S: Synchronized sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          This estimator, fitted.
-
-        Raises:
-          ValueError: If `sensor_basis` is unknown, if `Q` and `S` hold different
-            numbers of snapshots, if either holds non-finite values, or if a
-            rank or ridge option is out of range.
-        """
-        if self.sensor_basis not in ("pod", "pls"):
-            raise ValueError(f"sensor_basis must be 'pod' or 'pls', got {self.sensor_basis!r}")
-        Q = np.asarray(Q, np.float64)
-        S = np.asarray(S, np.float64)
-        self._check_pair(Q, S)
-
-        self.Psi, self.Sigma, self.B, self.q_mean = pod(
-            Q, self.r_field, subtract_mean=True, method=self.pod_method, seed=self.seed
-        )
-
-        Sc, self.s_mean, self.s_scale = self._prep_sensors(S, learn=True)
-        if self.sensor_basis == "pod":
-            self.Phi, _, self.C, _ = pod(Sc, self.r_sensor, subtract_mean=False)
-        else:
-            self.Phi = _pls_directions(self.B, Sc, self.r_sensor)
-            self.C = self.Phi.T @ Sc
-
-        self.M = lse_map(self.B, self.C, self._lam(self.C))
-        self.fitted = True
-        return self
-
-    def _lam(self, C: FloatArray) -> float:
-        """Scales `ridge` by the mean sensor coefficient energy.
-
-        Args:
-          C: Sensor coefficients, shape `(r_s, N_t)`.
-
-        Returns:
-          The Tikhonov parameter in the units `lse_map` expects.
-        """
-        energy: FloatArray = np.einsum("kt,kt->k", C, C)
-        return self.ridge * float(np.mean(energy))
-
-    def predict(self, S_new: FloatArray) -> FloatArray:
-        """Reconstructs fields from sensor data.
-
-        Args:
-          S_new: Sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          The reconstructed field, shape `(N_x, N_t)`.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        return self.Psi @ self.encode(S_new) + self.q_mean
-
-    def encode(self, S_new: FloatArray) -> FloatArray:
-        """Predicts field POD coefficients from sensor data.
-
-        Args:
-          S_new: Sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          Predicted field POD coefficients, shape `(r_field, N_t)`.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        self._check_fitted()
-        Sc, _, _ = self._prep_sensors(np.asarray(S_new, np.float64), learn=False)
-        return self.M @ (self.Phi.T @ Sc)
-
-    def score(self, Q_true: FloatArray, S_new: FloatArray) -> float:
-        """Returns the normalized MSE of the reconstruction.
-
-        Args:
-          Q_true: True field snapshots, shape `(N_x, N_t)`.
-          S_new: Synchronized sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          Normalized MSE. 0 is a perfect reconstruction; 1 matches predicting the
-          temporal mean.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        return nmse(np.asarray(Q_true, np.float64), self.predict(S_new))
-
-    def project(self, Q: FloatArray) -> FloatArray:
-        """Projects field data onto the fitted basis.
-
-        Args:
-          Q: Field snapshots, shape `(N_x, N_t)`.
-
-        Returns:
-          True field POD coefficients, shape `(r_field, N_t)`, which are what
-          `encode` predicts.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        self._check_fitted()
-        return self.Psi.T @ (np.asarray(Q, np.float64) - self.q_mean)
-
-    def floor(self, Q_true: FloatArray) -> float:
-        """Returns the best NMSE this field basis allows, independent of sensors.
-
-        Equals the truncation error of `Psi` on `Q_true`, so no estimator using
-        this basis scores below it.
-
-        Args:
-          Q_true: Field snapshots, shape `(N_x, N_t)`.
-
-        Returns:
-          The projection floor, as a normalized MSE.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-          ValueError: If `Q_true` has a different row count from `Psi`.
-        """
-        self._check_fitted()
-        return projection_floor(Q_true, self.Psi, self.q_mean)
-
-    @property
-    def n_params(self) -> int:
-        """Number of free parameters in the coefficient map, or 0 before `fit`."""
-        return int(self.M.size) if self.M.size else 0
-
-
-# ── Extended POD estimator ────────────────────────────────────────────────────
-
-
-@dataclass
-class ExtendedPOD(_SensorMixin):
-    """Estimates a field from sparse sensors by extended POD (Borée 2003).
-
-    Decomposes only the sensor record, then builds one extended field mode per
-    sensor mode by correlating the field against that mode's coefficient:
-
-        psi_ext_j = Q_c c_j / (||c_j||^2 + lam)       Psi_ext (N_x, r_s)
-        Q_hat     = Psi_ext C_new + q_mean
-
-    Computes `PODLSE(r_field=None)` without the field SVD. Each extended mode
-    `psi_ext_j` is the flow associated with sensor mode `j`, and the
-    reconstruction is a fixed combination of `r_sensor` of them.
-
-    Attributes:
-      r_sensor: POD modes kept for the sensor record. `None` keeps all `N_s`.
-      ridge: Tikhonov parameter, scaled as in `PODLSE`.
-      standardise_sensors: Divide each channel by its training standard
-        deviation before the sensor decomposition.
-      field_basis: Also compute the field POD, which `encode`, `observability`,
-        and `floor` require.
-      r_field: Modes kept for the field POD, when `field_basis` is `True`.
-      pod_method: Algorithm `pod` uses for the field POD.
-      seed: Random seed, forwarded to `pod`.
-      Psi_ext: Extended modes, shape `(N_x, r_sensor)`, learned by `fit`.
-      Phi: Sensor modes, shape `(N_s, r_sensor)`, learned by `fit`.
-      C: Sensor coefficients on the training block, learned by `fit`.
-      sigma_s: Sensor singular values, learned by `fit`.
-      Psi: Field modes, learned by `fit` when `field_basis` is `True`.
-      B: Field coefficients, learned by `fit` when `field_basis` is `True`.
-      q_mean: Field mean, shape `(N_x, 1)`, learned by `fit`.
-      s_mean: Per-channel sensor mean, learned by `fit`.
-      s_scale: Per-channel sensor scale, learned by `fit`.
-      fitted: Whether `fit` has completed.
-    """
-
-    r_sensor: int | None = None
-    ridge: float = 0.0
-    standardise_sensors: bool = True
-    field_basis: bool = False
-    r_field: int | None = None
-    pod_method: str = "svd"
-    seed: int = 0
-
-    # ── Learned state ──
-    Psi_ext: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    Phi: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    C: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    sigma_s: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    Psi: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    B: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    q_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    s_mean: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    s_scale: FloatArray = field(default_factory=lambda: np.empty(0), repr=False)
-    fitted: bool = False
-
-    def fit(self, Q: FloatArray, S: FloatArray) -> ExtendedPOD:
-        """Fits the sensor basis and one extended field mode per sensor mode.
-
-        Also fits the field POD when `field_basis` is `True`.
-
-        Args:
-          Q: Field snapshots, shape `(N_x, N_t)`.
-          S: Synchronized sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          This estimator, fitted.
-
-        Raises:
-          ValueError: If `ridge` is negative, if `Q` and `S` hold different
-            numbers of snapshots, if either holds non-finite values, or if a
-            rank option is below 1.
-        """
-        if self.ridge < 0:
-            raise ValueError(f"ridge must be >= 0, got {self.ridge}")
-        Q = np.asarray(Q, np.float64)
-        S = np.asarray(S, np.float64)
-        self._check_pair(Q, S)
-
-        self.q_mean = Q.mean(axis=1, keepdims=True)
-        Qc = Q - self.q_mean
-
-        Sc, self.s_mean, self.s_scale = self._prep_sensors(S, learn=True)
-        self.Phi, self.sigma_s, self.C, _ = pod(Sc, self.r_sensor, subtract_mean=False)
-
-        # The rows of `C` are orthogonal, so `C C.T` is diagonal and the
-        # least-squares solve reduces to a division per mode.
-        norms: FloatArray = np.einsum("kt,kt->k", self.C, self.C)
-        lam = self.ridge * float(np.mean(norms))
-        self.Psi_ext = (Qc @ self.C.T) / (norms + lam)
-
-        if self.field_basis:
-            self.Psi, _, self.B, _ = pod(
-                Qc,
-                self.r_field,
-                subtract_mean=False,
-                method=self.pod_method,
-                seed=self.seed,
-            )
-        self.fitted = True
-        return self
-
-    def coefficients(self, S_new: FloatArray) -> FloatArray:
-        """Projects sensor data onto the fitted sensor basis.
-
-        Args:
-          S_new: Sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          Sensor POD coefficients, shape `(r_sensor, N_t)`.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        self._check_fitted()
-        Sc, _, _ = self._prep_sensors(np.asarray(S_new, np.float64), learn=False)
-        return self.Phi.T @ Sc
-
-    def predict(self, S_new: FloatArray) -> FloatArray:
-        """Reconstructs fields from sensor data.
-
-        Args:
-          S_new: Sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          The reconstructed field, shape `(N_x, N_t)`.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        return self.Psi_ext @ self.coefficients(S_new) + self.q_mean
-
-    def encode(self, S_new: FloatArray) -> FloatArray:
-        """Predicts field POD coefficients from sensor data.
-
-        Args:
-          S_new: Sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          Predicted field POD coefficients, shape `(r_field, N_t)`.
-
-        Raises:
-          RuntimeError: If `fit` has not been called, or if the estimator was
-            constructed without `field_basis=True`.
-        """
-        self._check_fitted()
-        if not self.Psi.size:
-            raise RuntimeError("encode() needs field_basis=True at construction")
-        return self.Psi.T @ (self.predict(S_new) - self.q_mean)
-
-    def score(self, Q_true: FloatArray, S_new: FloatArray) -> float:
-        """Returns the normalized MSE of the reconstruction.
-
-        Args:
-          Q_true: True field snapshots, shape `(N_x, N_t)`.
-          S_new: Synchronized sensor record, shape `(N_s, N_t)`.
-
-        Returns:
-          Normalized MSE. 0 is a perfect reconstruction; 1 matches predicting the
-          temporal mean.
-
-        Raises:
-          RuntimeError: If `fit` has not been called.
-        """
-        return nmse(np.asarray(Q_true, np.float64), self.predict(S_new))
-
-    def observability(self) -> Observability:
-        """Measures the observability of the fitted field basis from the sensors.
-
-        Returns:
-          The result of `mode_observability` for the fitted field and sensor
-          coefficients.
-
-        Raises:
-          RuntimeError: If `fit` has not been called, or if the estimator was
-            constructed without `field_basis=True`.
-        """
-        self._check_fitted()
-        if not self.B.size:
-            raise RuntimeError("observability() needs field_basis=True")
-        return mode_observability(self.B, self.C)
-
-    def floor(self, Q_true: FloatArray) -> float:
-        """Returns the best NMSE this field basis allows, independent of sensors.
-
-        Args:
-          Q_true: Field snapshots, shape `(N_x, N_t)`.
-
-        Returns:
-          The truncation error of `Psi` on `Q_true`, as a normalized MSE.
-
-        Raises:
-          RuntimeError: If `fit` has not been called, or if the estimator was
-            constructed without `field_basis=True`.
-          ValueError: If `Q_true` has a different row count from `Psi`.
-        """
-        self._check_fitted()
-        if not self.Psi.size:
-            raise RuntimeError("floor() needs field_basis=True at construction")
-        return projection_floor(Q_true, self.Psi, self.q_mean)
-
-    @property
-    def n_params(self) -> int:
-        """Number of free parameters in the extended modes, or 0 before `fit`."""
-        return int(self.Psi_ext.size) if self.Psi_ext.size else 0
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
@@ -1212,7 +1066,7 @@ def ridge_cv(
       k: Number of folds.
       gap: Snapshots dropped on each side of every validation block.
       estimator: Builds the estimator for each candidate. Defaults to
-        `ExtendedPOD`.
+        `PODLSE`, which computes extended POD unless `r_field` is given.
       **kwargs: Forwarded to the estimator constructor.
 
     Returns:
@@ -1228,7 +1082,7 @@ def ridge_cv(
     if k < 2:
         raise ValueError(f"k must be >= 2, got {k}")
 
-    estimator = estimator or ExtendedPOD
+    estimator = estimator or PODLSE
     idx = np.asarray(idx)
     max_gap = max(0, len(idx) // (4 * k))
 

@@ -1,4 +1,3 @@
-# pyright: strict
 """Loads snapshot data in the array layout that `Projector` expects.
 
 Every loader in this module returns the same layout, `(Nu, Nt, Nx, Ny)`, where
@@ -22,14 +21,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 import numpy as np
 import numpy.typing as npt
-
-if TYPE_CHECKING:
-    # `read_h5` imports h5py at call time; this import serves annotations only.
-    import h5py
 
 __all__ = [
     "data_path",
@@ -207,14 +202,11 @@ class Reader(Protocol):
         ...
 
 
-def _dataset(f: h5py.File, name: str, path: str) -> h5py.Dataset:
+def _dataset(f: Any, name: str, path: str) -> Any:
     """Looks up a named HDF5 object and checks that it is a dataset.
 
     `h5py.File.__getitem__` returns a `Dataset`, a `Group`, or a `Datatype`, and
-    only `Dataset` supports `.shape`, `.astype`, and slicing. Narrowing the type
-    here lets the type checker verify the read loop. It also turns a group at
-    that name into an error that names the file and the field, rather than an
-    `AttributeError` raised from inside the loop.
+    only `Dataset` supports `.shape`, `.astype`, and slicing.
 
     Args:
       f: Open HDF5 file.

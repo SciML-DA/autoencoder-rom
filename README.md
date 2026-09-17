@@ -156,7 +156,7 @@ p.score(X)        # mean squared reconstruction error
 ├── src/
 │   ├── utils.py
 │   ├── config/
-│   │   └── esn_config.py        # ESNConfig, hashed save/load
+│   │   └── model_config.py      # ModelConfig, ESNConfig: hashed save/load
 │   ├── datasets/
 │   │   ├── snapshots.py         # Readers, decimation, SPECS
 │   │   ├── wake_experiment.py   # April experiment: readers, Case, build_case

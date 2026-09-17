@@ -1,320 +1,311 @@
+"""Convolutional autoencoder in PyTorch.
+
+Typical usage example:
+
+  cae = CAE(n_latent=8, channels=(16, 32, 64)).fit(X)
+  Z = cae.encode(X)
+  Q_hat = cae.decode(Z)
+  mse = cae.score(X)
+"""
+
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import torch
-import torch.nn as nn
+from torch import nn
 
-from . import Projector
+from .base import FloatArray, conv_stages
+from .torch_utils import TorchAutoencoder
 
 __all__ = ["CAE"]
 
 
-class CAE(Projector):
-    """
-    Convolutional Autoencoder.
+@dataclass(eq=False, repr=False)
+class CAE(TorchAutoencoder):
+    """A convolutional autoencoder on the snapshot grid.
 
-    PyTorch Conv2d encoder / ConvTranspose2d decoder on the 2-D spatial grid,
-    ending in a dense bottleneck of size ``n_latent``.
-    Stride-2 3x3 convs halving the grid each stage (tanh), flatten + Linear to
-    the latent, then the transposed mirror with output_padding to recover the size,
-    final conv linear.
+    The encoder applies one convolution per entry of `channels`, each followed
+    by `activation_function`, then flattens and maps linearly to `n_latent`
+    coefficients. The decoder maps linearly back to the bottleneck grid and
+    applies the mirrored transposed convolutions, with the last one linear.
+    Solid points enter as zeros and are excluded from the loss. `Autoencoder`
+    documents the training options.
 
-    Follows Racca et al. (2021) and Ozalp et al. (2024) — single-CAE variant
+    Attributes:
+      channels: Output channels of each encoder convolution.
+      kernel_size: Convolution kernel size.
+      stride: Convolution stride.
+      pad: Convolution padding.
 
-    Grid requirement: each stride-2 stage halves the grid, and the decoder
-    inverts it with ``output_padding``. Only works when every stage keeps
-    the ``output_padding`` in ``[0, stride)``.
-    Odd dims raise a ``ValueError`` telling you to pad the grid.
-
-    After ``fit(X)`` the following are available:
-
-        enc_conv, dec_conv : nn.Sequential   conv / transposed-conv stacks
-        enc_fc, dec_fc     : nn.Linear       bottleneck in / out
-        _red_shape         : (C, W, H)       grid size at the bottleneck
-        loss_history       : list[float]     mean training loss per epoch
-        _scale             : (N_x, 1)        per-field input normalisation
-        Q_mean             : (N_x, 1)        temporal mean (from the base)
-
-        NB:
-            encode returns Z (n_latent, N_t); decode maps Z back to flat
-            (N_x, N_t) in the original space, consistent with POD/AE.
-
-    Parameters
-    ----------
-    n_latent            : int    Bottleneck size.  Default: 10.
-    channels            : tuple  Conv channel widths per encoder stage; the
-                                 decoder mirrors them.  Default: (16, 32, 64).
-    kernel_size         : int    Conv kernel size.  Default: 3.
-    stride              : int    Downsampling stride per stage.  Default: 2.
-    pad                 : int    Conv padding.  Default: 1.
-    activation_function : str    'tanh' | 'relu' | 'elu' | 'identity'.
-    learning_rate       : float  Adam step size.  Default: 1e-3.
-    n_epochs            : int    Max epochs.  Default: 500.
-    batch_size          : int    Minibatch size.  Default: 32.
-    val_fraction        : float  Held-out fraction for early stopping.  Default: 0.2.
-    weight_decay        : float  L2 penalty (Adam).  Default: 0.0.
-    patience            : int    Early-stopping patience in epochs.  Default: 50.
-    lr_factor           : float  ReduceLROnPlateau decay factor.  Default: 0.5.
-    lr_patience         : int    Epochs on a val plateau before decaying the LR.
-                                 Keep well below ``patience``.  Default: 10.
-    min_lr              : float  Lower bound on the LR.  Default: 1e-6.
-    seed                : int    Torch RNG seed.  Default: 0.
-    device              : str    'cpu' | 'cuda'.  Default: 'cpu'.
-    **kwargs            : Override any of the above at construction.
-
-    Examples
-    --------
-    ::
-
-        cae = CAE(n_latent=8, channels=(16, 32, 64)).fit(X)  # X (Nu, N_t, Nx, Ny)
-        Z   = cae.encode(X)              # (8, N_t)
-        Xr  = cae.reconstruct(X)         # (N_x, N_t)
+    Raises:
+      ValueError: If an option is out of range, `activation_function` is
+        unknown, or `device` is not a valid torch device name.
     """
 
-    channels: tuple = (16, 32, 64)
+    channels: Sequence[int] = (16, 32, 64)
     kernel_size: int = 3
     stride: int = 2
     pad: int = 1
-    activation_function: str = "tanh"
-    learning_rate: float = 1e-3
-    threshold: float = 1e-4
-    n_epochs: int = 500
-    batch_size: int = 32
-    val_fraction: float = 0.2
-    weight_decay: float = 0.0
-    patience: int = 50
-    lr_factor: float = 0.5
-    lr_patience: int = 10
-    min_lr: float = 1e-6
-    seed: int = 0
-    device: str = "cpu"
 
-    _scale: Optional[np.ndarray] = None  # per-field input normalization (N_x, 1)
+    _enc_conv: nn.Sequential | None = field(default=None, init=False)
+    _enc_fc: nn.Linear | None = field(default=None, init=False)
+    _dec_fc: nn.Linear | None = field(default=None, init=False)
+    _dec_conv: nn.Sequential | None = field(default=None, init=False)
+    _red_shape: tuple[int, int, int] = field(default=(0, 0, 0), init=False)
 
-    _ACT = {"tanh": nn.Tanh, "relu": nn.ReLU, "elu": nn.ELU, "identity": nn.Identity}
-
-    def __init__(self, n_latent: int = 10, **kwargs):
-        self.N_latent = n_latent
-        for key, val in kwargs.items():
-            if hasattr(type(self), key):
-                setattr(self, key, val)
-        torch.manual_seed(self.seed)
-
-    # ── network construction ──────────────────────────────────────────────────
-
-    def _build_networks(self, c_in: int, nx: int, ny: int) -> None:
-        act = self._ACT[self.activation_function]
-        k, s, p = self.kernel_size, self.stride, self.pad
-
-        enc = []
-        c, w, h = c_in, nx, ny
-        sizes = [(w, h)]
-        for c_out in self.channels:
-            enc += [nn.Conv2d(c, c_out, k, s, p), act()]
-            c = c_out
-            w = (w + 2 * p - k) // s + 1
-            h = (h + 2 * p - k) // s + 1
-            sizes.append((w, h))
-
-        self._red_shape = (c, w, h)  # (C, W, H) at bottleneck
-        flat = c * w * h
-        self.enc_conv = nn.Sequential(*enc).to(self.device)
-        self.enc_fc = nn.Linear(flat, self.N_latent).to(self.device)
-        self.dec_fc = nn.Linear(self.N_latent, flat).to(self.device)
-
-        # decoder: mirror the encoder back up to c_in
-        dec_out = list(self.channels[-2::-1]) + [c_in]
-        targets = sizes[-2::-1]  # sizes to recover, top-down
-        dec = []
-        for i, c_out in enumerate(dec_out):
-            tw, th = targets[i]
-            op_w = tw - ((w - 1) * s - 2 * p + k)
-            op_h = th - ((h - 1) * s - 2 * p + k)
-            if not (0 <= op_w < s and 0 <= op_h < s):
-                raise ValueError(
-                    f"grid {nx}x{ny} not invertible with k={k},s={s},p={p}; "
-                    f"got output_padding ({op_w},{op_h}). Pad the grid to even dims."
-                )
-            dec.append(nn.ConvTranspose2d(c, c_out, k, s, p, output_padding=(op_w, op_h)))
-            if i < len(dec_out) - 1:  # final conv stays linear
-                dec.append(act())
-            c, w, h = c_out, tw, th
-        self.dec_conv = nn.Sequential(*dec).to(self.device)
-
-    def _networks(self) -> list:
-        return [self.enc_conv, self.enc_fc, self.dec_fc, self.dec_conv]
-
-    def _encode_grid(self, G: torch.Tensor) -> torch.Tensor:
-        return self.enc_fc(self.enc_conv(G).flatten(1))
-
-    def _decode_grid(self, Z: torch.Tensor) -> torch.Tensor:
-        return self.dec_conv(self.dec_fc(Z).view(-1, *self._red_shape))
-
-    @property
-    def scale(self) -> np.ndarray:
-        """The per-field scale that `fit` divides inputs by, shape `(N_x, 1)`.
+    def __post_init__(self) -> None:
+        """Validates the options.
 
         Raises:
-          AttributeError: If the autoencoder is not fitted.
+          ValueError: If an option is out of range, `activation_function` is
+            unknown, or `device` is not a valid torch device name.
         """
-        scale: np.ndarray | None = getattr(self, "_scale", None)
-        if scale is None:
-            raise AttributeError("Not fitted — call fit() first.")
-        return scale
+        super().__post_init__()
+        self.channels = tuple(self.channels)
+        if not self.channels or any(c < 1 for c in self.channels):
+            raise ValueError(f"channels must be non-empty with entries >= 1, got {self.channels}")
+        if self.kernel_size < 1 or self.stride < 1 or self.pad < 0:
+            raise ValueError(
+                f"need kernel_size >= 1, stride >= 1, pad >= 0; got {self.kernel_size}, {self.stride}, {self.pad}"
+            )
 
-    def networks(self) -> list[nn.Module]:
-        """Lists every network the autoencoder trains.
+    # ── Networks ──────────────────────────────────────────────────────────────
 
-        Returns:
-          The convolutional encoder, the dense encoder stage, the dense decoder
-          stage, and the transposed-convolution decoder, in that order.
+    @property
+    def enc_conv(self) -> nn.Sequential:
+        """The convolutional encoder stages.
+
+        Raises:
+          RuntimeError: If the networks have not been built.
         """
-        return self._networks()
+        if self._enc_conv is None:
+            raise RuntimeError("CAE is not fitted; call fit() first")
+        return self._enc_conv
 
-    def decode_grid(self, Z: torch.Tensor) -> torch.Tensor:
-        """Decodes latent codes onto the spatial grid, differentiably.
+    @property
+    def enc_fc(self) -> nn.Linear:
+        """The linear map from the bottleneck grid to the latent space.
 
-        Args:
-          Z: Latent codes, shape `(B, N_latent)`.
-
-        Returns:
-          Fields in scaled units, shape `(B, Nu, Nx, Ny)`.
+        Raises:
+          RuntimeError: If the networks have not been built.
         """
-        return self._decode_grid(Z)
+        if self._enc_fc is None:
+            raise RuntimeError("CAE is not fitted; call fit() first")
+        return self._enc_fc
 
-    # ── flat (N_x, N_t) <-> grid (N_t, Nu, Nx, Ny) with the solid mask ─────────
+    @property
+    def dec_fc(self) -> nn.Linear:
+        """The linear map from the latent space to the bottleneck grid.
 
-    def _flat_to_grid(self, Q: np.ndarray) -> np.ndarray:
-        Nu, Nx, Ny = self.grid_shape
-        n_t = Q.shape[1]
-        n_fluid = int(self.fluid_mask_flat.sum())
-        full = np.zeros((Nu, n_t, Nx * Ny), dtype=Q.dtype)
-        A = Q.reshape(n_fluid, Nu, n_t).transpose(1, 2, 0)  # (Nu, Nt, N_fluid)
-        full[:, :, self.fluid_mask_flat] = A
-        return full.reshape(Nu, n_t, Nx, Ny).transpose(1, 0, 2, 3)  # (Nt,Nu,Nx,Ny)
+        Raises:
+          RuntimeError: If the networks have not been built.
+        """
+        if self._dec_fc is None:
+            raise RuntimeError("CAE is not fitted; call fit() first")
+        return self._dec_fc
 
-    def _grid_to_flat(self, G: np.ndarray) -> np.ndarray:
-        Nu, Nx, Ny = self.grid_shape
-        Gf = G.reshape(G.shape[0], Nu, Nx * Ny)[:, :, self.fluid_mask_flat]
-        return Gf.transpose(2, 1, 0).reshape(-1, G.shape[0])  # (N_fluid*Nu, Nt)
+    @property
+    def dec_conv(self) -> nn.Sequential:
+        """The transposed-convolution decoder stages.
 
-    # ── Projector interface ────────────────────────────────────────────────────
-
-    def fit(self, X: np.ndarray) -> CAE:
-        Q = self.preprocess_snapshot(X)  # (N_x, N_t), zero-mean
-        assert self.grid_shape is not None, "CAE needs raw grid input to fit."
-        Nu, Nx, Ny = self.grid_shape
-        self._scale = self._field_scale(Q)  # per-field std (N_x, 1)
-        self._build_networks(Nu, Nx, Ny)
-
-        G = self._flat_to_grid(Q / self._scale)  # (N_t, Nu, Nx, Ny)
-        data = torch.as_tensor(G, dtype=torch.float32, device=self.device)
-        mask = torch.as_tensor(
-            self.fluid_mask_flat.reshape(Nx, Ny),
-            dtype=torch.float32,
-            device=self.device,
-        )[None, None]  # (1,1,Nx,Ny)
-
-        n_t = data.shape[0]
-        n_val = int(round(self.val_fraction * n_t))
-        X_tr, X_val = data[: n_t - n_val], data[n_t - n_val :]
-
-        params = [q for net in self._networks() for q in net.parameters()]
-        # The default Adam path loops over parameter tensors in Python and
-        # launches several tiny kernels per tensor; profiling put 47% of CUDA
-        # time in Adam.step. fused=True does the whole update in one kernel.
-        # It reassociates the elementwise arithmetic, so results shift by
-        # ~float32 eps -- about a thousand times smaller than the seed-to-seed
-        # spread these results already carry.
-        opt = torch.optim.Adam(
-            params,
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
-            **_fused_adam_ok(params),
-        )
-        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            opt,
-            factor=self.lr_factor,
-            patience=self.lr_patience,
-            min_lr=self.min_lr,
-        )
-
-        def masked_mse(recon, target):
-            # divide by Nu too: the sum runs over the field channels, so without
-            # it this is Nu x a true mean and the CAE curves sit a constant
-            # factor above the AE ones for no physical reason
-            return ((recon - target) ** 2 * mask).sum() / (mask.sum() * target.shape[0] * Nu)
-
-        best_val, wait = float("inf"), 0
-        best_state = _alloc_snapshot(tuple(self._networks()))
-        have_best = False
-        self.loss_history = []
-        self.val_loss_history = []
-        self.n_epochs_run = 0
-        for _ in range(self.n_epochs):
-            for net in self._networks():
-                net.train()
-            # randperm stays on CPU so the RNG stream -- and therefore the exact
-            # batch ordering -- is unchanged; only the transfer moves. Indexing a
-            # device tensor with a CPU index tensor copies it per step; sending
-            # the permutation once per epoch does it once instead.
-            # NOT non_blocking: from pageable memory that copy is genuinely
-            # async and the very next line indexes with it, which under real
-            # training load silently gathered stale rows.
-            order = torch.randperm(X_tr.shape[0]).to(X_tr.device)
-            run = 0.0
-            for s in range(0, X_tr.shape[0], self.batch_size):
-                batch = X_tr[order[s : s + self.batch_size]]
-                opt.zero_grad()
-                recon = self._decode_grid(self._encode_grid(batch))
-                loss = masked_mse(recon, batch)
-                loss.backward()
-                opt.step()
-                run += loss.item() * batch.shape[0]
-            self.loss_history.append(run / X_tr.shape[0])
-            self.n_epochs_run += 1
-
-            if n_val > 0:
-                for net in self._networks():
-                    net.eval()
-                with torch.no_grad():
-                    v = masked_mse(self._decode_grid(self._encode_grid(X_val)), X_val).item()
-                self.val_loss_history.append(v)
-                sched.step(v)
-                if v < best_val * (1.0 - self.threshold):
-                    best_val, wait = v, 0
-                    _save_snapshot(tuple(self._networks()), best_state)
-                    have_best = True
-                else:
-                    wait += 1
-                    if wait >= self.patience:
-                        break
-
-        if have_best:
-            for net, st in zip(self._networks(), best_state):
-                net.load_state_dict(st)
-        self.fitted = True
-        return self
+        Raises:
+          RuntimeError: If the networks have not been built.
+        """
+        if self._dec_conv is None:
+            raise RuntimeError("CAE is not fitted; call fit() first")
+        return self._dec_conv
 
     @property
     def n_params(self) -> int:
-        return sum(q.numel() for net in self._networks() for q in net.parameters())
+        """Number of trainable parameters, or 0 before the networks are built."""
+        if self._enc_conv is None:
+            return 0
+        return sum(p.numel() for net in self.networks() for p in net.parameters())
 
-    def encode(self, X: np.ndarray) -> np.ndarray:
-        Q = self.preprocess_snapshot(X)
-        G = torch.as_tensor(self._flat_to_grid(Q / self._scale), dtype=torch.float32, device=self.device)
-        for net in self._networks():
+    def networks(self) -> list[nn.Module]:
+        """Lists the networks in the order the encoder and decoder apply them.
+
+        Returns:
+          The convolutional encoder, the encoder's linear map, the decoder's
+          linear map, and the transposed-convolution decoder.
+
+        Raises:
+          RuntimeError: If the networks have not been built.
+        """
+        return [self.enc_conv, self.enc_fc, self.dec_fc, self.dec_conv]
+
+    def encode_grid(self, G: torch.Tensor) -> torch.Tensor:
+        """Encodes a batch of scaled grid snapshots, differentiably.
+
+        Args:
+          G: Scaled snapshots with zeros at solid points, shape
+            `(B, Nu, Nx, Ny)`.
+
+        Returns:
+          Latent codes, shape `(B, n_latent)`.
+
+        Raises:
+          RuntimeError: If the networks have not been built.
+        """
+        return self.enc_fc(self.enc_conv(G).flatten(1))
+
+    def decode_grid(self, Z: torch.Tensor) -> torch.Tensor:
+        """Decodes a batch of latent codes onto the grid, differentiably.
+
+        Args:
+          Z: Latent codes, shape `(B, n_latent)`.
+
+        Returns:
+          Scaled fields, shape `(B, Nu, Nx, Ny)`.
+
+        Raises:
+          RuntimeError: If the networks have not been built.
+        """
+        return self.dec_conv(self.dec_fc(Z).view(-1, *self._red_shape))
+
+    def _networks_by_name(self) -> dict[str, nn.Module]:
+        """Lists the networks by name, in the order `networks` returns them.
+
+        Raises:
+          RuntimeError: If the networks have not been built.
+        """
+        return {"enc_conv": self.enc_conv, "enc_fc": self.enc_fc, "dec_fc": self.dec_fc, "dec_conv": self.dec_conv}
+
+    def _build_networks(self) -> None:
+        """Creates freshly initialized encoder and decoder networks for the recorded grid.
+
+        Raises:
+          ValueError: If the grid is too small for the convolution stages.
+        """
+        c_in, nx, ny = self._grid()
+        k, s, p = self.kernel_size, self.stride, self.pad
+        encoder, decoder = conv_stages((c_in, nx, ny), self.channels, k, s, p)
+        c_red, (h_red, w_red) = encoder[-1].c_out, encoder[-1].size_out
+        self._red_shape = (c_red, h_red, w_red)
+        flat = c_red * h_red * w_red
+
+        enc: list[nn.Module] = []
+        for stage in encoder:
+            enc += [nn.Conv2d(stage.c_in, stage.c_out, k, s, p), self._activation()]
+        self._enc_conv = nn.Sequential(*enc).to(self.device)
+        self._enc_fc = nn.Linear(flat, self.N_latent).to(self.device)
+        self._dec_fc = nn.Linear(self.N_latent, flat).to(self.device)
+
+        dec: list[nn.Module] = []
+        for stage in decoder:
+            if dec:
+                dec.append(self._activation())
+            dec.append(nn.ConvTranspose2d(stage.c_in, stage.c_out, k, s, p, output_padding=stage.output_padding))
+        self._dec_conv = nn.Sequential(*dec).to(self.device)
+
+    # ── Projector ─────────────────────────────────────────────────────────────
+
+    def fit(self, X: npt.NDArray[Any]) -> CAE:
+        """Trains the encoder and decoder on snapshots.
+
+        Args:
+          X: Snapshots on the grid, shape `(Nu, N_t, Nx, Ny)`, with NaN at solid
+            points.
+
+        Returns:
+          This autoencoder, fitted.
+
+        Raises:
+          ValueError: If `X` is not a valid grid record, `val_fraction` leaves no
+            training snapshots, or the grid is too small for the convolution
+            stages.
+        """
+        Q, n_val = self._prepare_fit(X)
+        Nu, Nx, Ny = self._grid()
+        n_t = Q.shape[1]
+        self._build_networks()
+        mask = torch.as_tensor(self._fluid_mask().reshape(Nx, Ny), dtype=torch.float32, device=self.device)[None, None]
+
+        def loss_fn(batch: torch.Tensor) -> torch.Tensor:
+            """Computes the mean squared reconstruction error over fluid points."""
+            recon = self.decode_grid(self.encode_grid(batch))
+            return ((recon - batch) ** 2 * mask).sum() / (mask.sum() * batch.shape[0] * Nu)
+
+        data = self._to_tensor(Q)
+        history = self._train(self.networks(), loss_fn, data[: n_t - n_val], data[n_t - n_val :])
+        self._finish_fit(history)
+        return self
+
+    def encode(self, X: npt.NDArray[Any]) -> FloatArray:
+        """Encodes snapshots into latent coefficients.
+
+        Args:
+          X: Snapshots in the grid, snapshot, or flat layout.
+
+        Returns:
+          Latent coefficients, shape `(n_latent, N_t)`.
+
+        Raises:
+          RuntimeError: If `fit` has not completed.
+          ValueError: If `X` does not match the fitted grid.
+        """
+        self._check_fitted()
+        G = self._to_tensor(self.preprocess_snapshot(X))
+        for net in self.networks():
             net.eval()
         with torch.no_grad():
-            Z = self._encode_grid(G)
-        return Z.detach().cpu().numpy().T  # (N_latent, N_t)
+            Z = self.encode_grid(G)
+        return Z.cpu().numpy().T
 
-    def decode(self, Z: np.ndarray) -> np.ndarray:
-        Zt = torch.as_tensor(np.asarray(Z).T, dtype=torch.float32, device=self.device)
-        for net in self._networks():
+    def decode(self, Z: npt.NDArray[Any]) -> FloatArray:
+        """Decodes latent coefficients into flat fields.
+
+        Args:
+          Z: Latent coefficients, shape `(n_latent, N_t)`.
+
+        Returns:
+          Flat fields with the temporal mean restored, shape `(N_x, N_t)`.
+
+        Raises:
+          RuntimeError: If `fit` has not completed.
+          ValueError: If `Z` is not two-dimensional with `n_latent` rows.
+        """
+        self._check_fitted()
+        Z = self._check_latent(Z)
+        for net in self.networks():
             net.eval()
         with torch.no_grad():
-            G = self._decode_grid(Zt).detach().cpu().numpy()  # (N_t,Nu,Nx,Ny)
-        return self._grid_to_flat(G) * self._scale + self.Q_mean  # (N_x, N_t)
+            G = self.decode_grid(torch.as_tensor(Z.T, dtype=torch.float32, device=self.device))
+        return self._grid_to_flat(G.cpu().numpy()) * self.scale + self.Q_mean
+
+    # ── Layouts ───────────────────────────────────────────────────────────────
+
+    def _to_tensor(self, Q: FloatArray) -> torch.Tensor:
+        """Scales zero-mean flat fields and places them on the grid as a tensor.
+
+        Args:
+          Q: Zero-mean flat fields, shape `(N_x, N_t)`.
+
+        Returns:
+          Scaled float32 fields with zeros at solid points, shape
+          `(N_t, Nu, Nx, Ny)`.
+        """
+        Nu, Nx, Ny = self._grid()
+        mask = self._fluid_mask()
+        n_t = Q.shape[1]
+        values = (Q / self.scale).reshape(Nu, int(mask.sum()), n_t).transpose(0, 2, 1)
+        grid: FloatArray = np.zeros((Nu, n_t, Nx * Ny), dtype=Q.dtype)
+        grid[:, :, mask] = values
+        G = grid.reshape(Nu, n_t, Nx, Ny).transpose(1, 0, 2, 3)
+        return torch.as_tensor(G, dtype=torch.float32, device=self.device)
+
+    def _grid_to_flat(self, G: FloatArray) -> FloatArray:
+        """Selects the fluid points of fields on the grid.
+
+        Args:
+          G: Fields, shape `(N_t, Nu, Nx, Ny)`.
+
+        Returns:
+          Flat fields, shape `(N_x, N_t)`.
+        """
+        return self._to_flat(G.transpose(1, 0, 2, 3))

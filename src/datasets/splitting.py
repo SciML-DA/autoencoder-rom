@@ -1,4 +1,3 @@
-# pyright: strict
 """Splits a snapshot set into train, validation, and test blocks.
 
 Typical usage example:

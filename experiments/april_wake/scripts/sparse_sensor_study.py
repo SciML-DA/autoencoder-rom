@@ -98,7 +98,6 @@ from field_estimation.branched_ae import (  # noqa: E402
 )
 from field_estimation.epod import (  # noqa: E402
     PODLSE,
-    ExtendedPOD,
     cosine,
     delay_embed,
     energy_ratio,
@@ -193,10 +192,10 @@ def run_linear(Q, S, tr, te, args, Psi, q_mean, results, per_snap, preds, run_id
                 f"  {time.time() - t0:.0f}s"
             )
 
-        for name, ctor in (("podlse", PODLSE), ("epod", ExtendedPOD)):
+        for name in ("podlse", "epod"):
             t0 = time.time()
             if name == "podlse":
-                m = ctor(
+                m = PODLSE(
                     r_field=args.r_field,
                     r_sensor=r_s,
                     ridge=ridge,
@@ -205,7 +204,7 @@ def run_linear(Q, S, tr, te, args, Psi, q_mean, results, per_snap, preds, run_id
                 ).fit(Q[:, tr], Sd[:, tr])
                 lat = nmse(m.project(Q[:, te]), m.encode(Sd[:, te]))
             else:
-                m = ctor(r_sensor=r_s, ridge=ridge).fit(Q[:, tr], Sd[:, tr])
+                m = PODLSE(r_sensor=r_s, ridge=ridge).fit(Q[:, tr], Sd[:, tr])
                 lat = float("nan")
             dt = time.time() - t0
             pred = m.predict(Sd[:, te])
@@ -291,8 +290,8 @@ def build_latents(Q, tr, args, case0, unflat):
         print(
             f"  {kind.upper()} latent={args.r_field}: {time.time() - t0:.1f}s, "
             f"{p.n_params / 1e6:.1f}M params, "
-            f"{getattr(p, 'n_epochs_run', args.ae_epochs)} epochs, "
-            f"train MSE {p.loss_history[-1]:.3e}"
+            f"{p.training_history.n_epochs_run} epochs, "
+            f"train MSE {p.training_history.train[-1]:.3e}"
         )
         out[kind] = (TorchLatent(p, device=args.device), None, None, None)
     return out

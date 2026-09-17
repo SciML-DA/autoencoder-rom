@@ -899,17 +899,17 @@ class Case:
         return (self.X.shape[0], self.X.shape[2], self.X.shape[3])
 
     def flat(self, fill: Optional[float] = None) -> np.ndarray:
-        """(N_fluid * Nu, N_t) data matrix, columns as snapshots.
+        """(Nu * N_fluid, N_t) data matrix, columns as snapshots.
 
-        Row ordering is `f * Nu + u`, fluid point major and component minor,
-        matching `Projector._to_flat`.
+        Row ordering is `u * N_fluid + f`, component major and fluid point
+        minor, matching `Projector._to_flat`.
 
         Args:
             fill: Value substituted at invalid vectors. `None` drops those
                 points instead of keeping them.
 
         Returns:
-            The data matrix, shape (N_fluid * Nu, N_t).
+            The data matrix, shape (Nu * N_fluid, N_t).
         """
         Nu, Nt, Nx, Ny = self.X.shape
         A = self.X.reshape(Nu, Nt, Nx * Ny)
@@ -917,7 +917,7 @@ class Case:
             A = A[:, :, self.fluid_mask.ravel()]
         else:
             A = np.where(np.isnan(A), fill, A)
-        return A.transpose(2, 0, 1).reshape(-1, Nt)
+        return A.transpose(0, 2, 1).reshape(-1, Nt)
 
     def unflat(self, Q: np.ndarray, fill_used: bool = False, dtype=None) -> np.ndarray:
         """Inverse of ``flat``: (N_x, N_t) -> (Nu, Nt, Nx, Ny) with NaN holes.
@@ -943,7 +943,7 @@ class Case:
         n_t = Q.shape[1]
         dtype = dtype or Q.dtype
         keep = np.ones(Nx * Ny, bool) if fill_used else self.fluid_mask.ravel()
-        A = Q.reshape(int(keep.sum()), Nu, n_t).transpose(1, 2, 0)  # (Nu, Nt, N_keep)
+        A = Q.reshape(Nu, int(keep.sum()), n_t).transpose(0, 2, 1)  # (Nu, Nt, N_keep)
         out = np.full((Nu, n_t, Nx * Ny), np.nan, dtype=dtype)
         out[:, :, keep] = A
         return out.reshape(Nu, n_t, Nx, Ny)
@@ -1216,7 +1216,7 @@ def concat_cases(cases: list) -> tuple:
     for i, c in enumerate(cases):
         Nu, Nt, Nx, Ny = c.X.shape
         A = c.X.reshape(Nu, Nt, Nx * Ny)[:, :, mask.ravel()]
-        Qs.append(A.transpose(2, 0, 1).reshape(-1, Nt))
+        Qs.append(A.transpose(0, 2, 1).reshape(-1, Nt))
         Ss.append(c.S)
         ids.append(np.full(Nt, i))
     return np.concatenate(Qs, 1), np.concatenate(Ss, 1), np.concatenate(ids)

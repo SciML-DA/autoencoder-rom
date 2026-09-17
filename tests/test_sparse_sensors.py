@@ -44,7 +44,6 @@ from field_estimation.branched_ae import (  # noqa: E402
 )
 from field_estimation.epod import (  # noqa: E402
     PODLSE,
-    ExtendedPOD,
     blocked_folds,
     delay_embed,
     extended_pod,
@@ -141,7 +140,7 @@ def _grid(c, Q=None):
     Q = c["Q"] if Q is None else Q
     n_t = Q.shape[1]
     out = np.full((2, n_t, c["n_x"] * c["n_y"]), np.nan)
-    A = Q.reshape(-1, 2, n_t).transpose(1, 2, 0)
+    A = Q.reshape(2, -1, n_t).transpose(0, 2, 1)
     out[:, :, c["fluid"].ravel()] = A
     return out.reshape(2, n_t, c["n_x"], c["n_y"])
 
@@ -224,13 +223,15 @@ def test_lse_map_solves_least_squares(v):
 
 
 def test_epod_equals_podlse(v):
-    """Extended POD == POD-LSE with an untruncated field basis, at any ridge."""
+    """PODLSE(r_field=None) equals POD-LSE with every field mode kept, at any ridge."""
     c = toy(response="quadratic", snr_db=30)
+    Psi, _, B, q_mean = pod(c["Q"], None, subtract_mean=True)
     worst = 0.0
     for ridge in (0.0, 1e-4, 1e-1):
         a = PODLSE(r_field=None, r_sensor=None, ridge=ridge).fit(c["Q"], c["S"])
-        b = ExtendedPOD(r_sensor=None, ridge=ridge).fit(c["Q"], c["S"])
-        d = np.abs(a.predict(c["S"]) - b.predict(c["S"])).max() / np.abs(c["Q"]).max()
+        M = lse_map(B, a.C, a._lam(a.C))
+        full = Psi @ M @ a.coefficients(c["S"]) + q_mean
+        d = np.abs(a.predict(c["S"]) - full).max() / np.abs(c["Q"]).max()
         worst = max(worst, d)
     assert worst < 1e-10, f"max |diff| {worst:.2e}"
 
@@ -243,11 +244,34 @@ def test_epod_is_borees_formula(v):
     orthogonal coefficient rows, which is worth asserting rather than assuming.
     """
     c = toy()
-    m = ExtendedPOD(r_sensor=6, ridge=0.0).fit(c["Q"], c["S"])
+    m = PODLSE(r_sensor=6, ridge=0.0).fit(c["Q"], c["S"])
     Qc = c["Q"] - m.q_mean
     direct = np.stack([Qc @ ck / (ck @ ck) for ck in m.C], axis=1)
     d = np.abs(direct - m.Psi_ext).max() / np.abs(m.Psi_ext).max()
     assert d < 1e-10, f"max rel diff {d:.2e}"
+
+
+def test_extended_podlse_needs_r_field_for_the_field_basis(v):
+    """Without a field POD, the methods that need one raise."""
+    c = toy()
+    m = PODLSE(r_sensor=6).fit(c["Q"], c["S"])
+    assert m.Psi_ext.shape == (c["Q"].shape[0], 6) and m.n_params == m.Psi_ext.size
+    for call in (lambda: m.encode(c["S"]), lambda: m.project(c["Q"]), lambda: m.floor(c["Q"]), m.observability):
+        with pytest.raises(RuntimeError, match="needs a field POD"):
+            call()
+
+
+def test_jax_podlse_matches_numpy_in_both_modes(v):
+    """PODLSEJax predicts what PODLSE predicts, truncated and extended."""
+    from field_estimation import PODLSEJax
+
+    c = toy(response="quadratic", snr_db=30)
+    worst = 0.0
+    for r_field in (None, c["rank"]):
+        a = PODLSE(r_field=r_field, r_sensor=6, ridge=1e-4).fit(c["Q"], c["S"])
+        b = PODLSEJax(r_field=r_field, r_sensor=6, ridge=1e-4, pod_method="svd").fit(c["Q"], c["S"])
+        worst = max(worst, np.abs(a.predict(c["S"]) - b.predict(c["S"])).max() / np.abs(c["Q"]).max())
+    assert worst < 1e-8, f"max |diff| {worst:.2e}"
 
 
 def test_extended_pod_recovers_sensor_map(v):

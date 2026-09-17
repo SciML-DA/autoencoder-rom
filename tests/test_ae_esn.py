@@ -1,11 +1,8 @@
 """Checks for the latent-ROM layer: the ntsa model protocol, the projector
 additions sensor placement is built on, and the AE/CAE-backed ROMs themselves.
 
-The important one is `test_pod_sensor_placement_unchanged`: sensor placement was
-lifted out of `POD_ESN` into `SensorPlacementMixin` and its one POD-specific
-line replaced by `spatial_basis`. `POD.spatial_basis` returns `Psi`, so that
-lift must be a no-op for POD_ESN -- if this test ever fails, the generalisation
-changed linear behaviour, which it must not.
+`test_pod_sensor_placement_unchanged` checks that placing sensors on
+`spatial_basis` reproduces the original QR pivoting on `Psi` for POD.
 
 Slow cases (anything that trains an ESN) are skipped unless VERIFY_SLOW=1, in
 keeping with the rest of tests/.
@@ -101,14 +98,7 @@ def test_decode_at_without_idx_is_full_decode(pod, data):
 # ---------------------------------------------------------------------------
 
 def _reference_placement(case, N_sensors):
-    """The pre-lift algorithm, pivoting explicitly on ``Psi``.
-
-    This is what `POD_ESN.define_sensors` did before placement moved into
-    `SensorPlacementMixin` and started going through `spatial_basis`. Kept
-    inline (rather than as a recorded array of indices) so the invariant is
-    checked against the computation itself and does not silently rot the moment
-    the fixture data changes.
-    """
+    """The original placement algorithm, pivoting explicitly on ``Psi`` on the grid."""
     import scipy.linalg as sla
 
     Nu, Nx, Ny = case.grid_shape
@@ -221,12 +211,7 @@ def test_ntsa_protocol_surface(data, name):
 
 
 # ---------------------------------------------------------------------------
-# Pass 4: the LSTM half of the matrix.
-#
-# These are the acceptance test for the mixins. If a forecaster swap needed
-# changes *inside* LatentROMMixin/SensorPlacementMixin, the forecaster boundary
-# would be in the wrong place -- so what matters is that these classes are
-# declarations and nothing more.
+# LSTM ROMs
 # ---------------------------------------------------------------------------
 
 @slow
@@ -252,25 +237,30 @@ def test_lstm_model_state_layout_and_step_contract(data):
 
 
 @slow
-def test_lstm_training_history_survives_model_init(data):
-    """`LSTM.history` (loss curves) and `Model.history` (state buffer) collide;
-    Model.__init__ runs last, so the curves must be rescued to `loss_history`
-    or they are silently destroyed."""
-    from models.data_driven import POD_LSTM
+@pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM"])
+def test_rom_keeps_projector_and_forecaster_histories(data, name):
+    """Both training histories survive construction, which overwrites `training_history`."""
+    import models.data_driven as dd
 
-    m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
-                 grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-                 epochs=2, seq_len=50)
-    assert set(m.loss_history) == {"train", "val"}
-    assert len(m.loss_history["train"]) > 0
+    kw = dict(data=data, dt=0.01, grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
+              epochs=2, seq_len=50)
+    kw |= (dict(n_modes=6, method="exact", random_state=0) if "POD" in name
+           else dict(n_latent=6, n_epochs=5, seed=3))
+    m = getattr(dd, name)(**kw)
+
+    assert m.forecaster_history is not None and m.forecaster_history.n_epochs_run == 2
+    if "POD" in name:
+        assert m.projector_history is None
+    else:
+        assert m.projector_history is not None and m.projector_history.n_epochs_run == 5
+        assert m.seed == 3, "the LSTM takes the projector's seed rather than resetting it"
     m.close()
 
 
 @slow
 @pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM", "CAE_LSTM"])
-def test_lstm_roms_reuse_the_mixins(data, name):
-    """Every LSTM ROM gets sensor placement, observables and latent bookkeeping
-    from the same mixins the ESN ROMs use."""
+def test_lstm_roms_place_sensors_and_forecast(data, name):
+    """Every LSTM ROM places sensors and forecasts finite observables."""
     import models.data_driven as dd
 
     cls = getattr(dd, name)
@@ -290,16 +280,81 @@ def test_lstm_roms_reuse_the_mixins(data, name):
 
 
 @slow
-def test_lstm_model_rejects_ensembles_explicitly(data):
-    """LSTM.step asserts (N, 1) shapes. m > 1 must raise rather than quietly
-    forecasting a single member."""
+def test_lstm_model_forecasts_each_ensemble_member(data):
+    """Each member of an ensemble forecasts as a single-member model would."""
     from models.data_driven import POD_LSTM
 
     m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
                  grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
                  epochs=2, seq_len=50)
-    m.psi0 = np.tile(m.psi0, (1, 3))  # pretend a 3-member ensemble
-    m.update_history(m.psi0[np.newaxis], t=np.array([0.0]), reset=True)
-    with pytest.raises(NotImplementedError, match="single-member"):
-        m.time_step(Nt=2)
+    single, _ = m.time_step(Nt=5)
+
+    u0 = m.current_state[:m.N_dim]
+    members = np.hstack([u0, u0 + 0.01, u0 - 0.01])
+    m.reset_forecaster(u0=members)
+    ensemble, t = m.time_step(Nt=5)
+    assert ensemble.shape == (6, m.Nphi, 3) and t.shape == (6,)
+    np.testing.assert_allclose(ensemble[..., :1], single, rtol=0, atol=1e-12)
+
+    averaged, _ = m.time_step(Nt=5, averaged=True)
+    np.testing.assert_allclose(averaged.mean(axis=-1), ensemble[..., 0], atol=1e-12)
+    m.close()
+
+
+# ---------------------------------------------------------------------------
+# Sensor readout and resets
+# ---------------------------------------------------------------------------
+
+def _masked(data):
+    """The fixture with a solid body, so the fluid mask matters."""
+    masked = data.copy()
+    masked[:, :, 5:7, 2:4] = np.nan
+    return masked
+
+
+@slow
+@pytest.mark.parametrize("name", ["POD_ESN", "AE_LSTM"])
+def test_observables_read_the_decoded_field_at_the_sensors(data, name):
+    """get_observables equals the decoded field on the grid at sensor_locations."""
+    import models.data_driven as dd
+
+    kw = (dict(n_modes=6, method="exact", random_state=0) if name == "POD_ESN"
+          else dict(n_latent=4, n_epochs=10))
+    m = getattr(dd, name)(data=_masked(data), dt=0.01, grid_shape=GRID, domain=DOMAIN,
+                          Nq=6, seed=0, train_forecaster=False, **kw)
+    Z = m.latent_training_trajectory[:, :5]
+    Nu, Nx, Ny = GRID
+    field = m._to_physical_grid(m.decode(Z)).transpose(0, 2, 3, 1).reshape(Nu * Nx * Ny, -1)
+
+    np.testing.assert_allclose(m.get_observables(Z=Z), field[m.sensor_locations], rtol=1e-12)
+    Z3 = Z.T[:, :, None]  # (Nt, N_latent, m=1)
+    np.testing.assert_allclose(m.get_observables(Z=Z3)[:, :, 0], field[m.sensor_locations].T, rtol=1e-12)
+
+
+@slow
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            "POD_ESN",
+            marks=pytest.mark.xfail(
+                raises=AttributeError,
+                strict=True,
+                reason="dynamodels Model.reset_model re-runs Model.__init__, which cannot reassign alpha0",
+            ),
+        ),
+        "POD_LSTM",
+    ],
+)
+def test_reset_case_resets_the_forecaster(data, name):
+    """reset_case(reset_forecaster=True) restarts from the first training snapshot."""
+    import models.data_driven as dd
+
+    kw = (dict(N_func_evals=4, N_grid=2) if name == "POD_ESN" else dict(epochs=2, seq_len=50))
+    m = getattr(dd, name)(data=data, dt=0.01, n_modes=6, method="exact", random_state=0, grid_shape=GRID,
+                          domain=DOMAIN, Nq=8, seed=0, N_units=16, N_wash=5, **kw)
+    p, t = m.time_integrate(Nt=5)
+    m.update_history(p, t)
+    m.reset_case(reset_forecaster=True)
+    assert np.isfinite(m.get_observable_hist()).all()
     m.close()

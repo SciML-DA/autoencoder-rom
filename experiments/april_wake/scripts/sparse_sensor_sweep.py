@@ -78,6 +78,7 @@ import numpy as np  # noqa: E402
 # `src` needs no insert: the editable install puts it on sys.path.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
+from config.model_config import load_model_from_config, save_model_to_config  # noqa: E402
 from experiments.april_wake.case_reader import F_PIV_HZ, RUNS  # noqa: E402
 from experiments.april_wake.data_preprocessing import (  # noqa: E402
     add_data_args,
@@ -215,11 +216,12 @@ def _ae_hash(kind, r, seed, args, n_train) -> str:
     source would invalidate the cache on a comment change, and hashing nothing
     would serve a stale model after a real change. The compromise is that this
     covers hyperparameters and you clear ``--cache-dir`` by hand when you touch
-    the model. Same trade-off ``config/esn_config.py`` makes for the ESN.
+    the model. Same trade-off ``config/model_config.py`` makes for the ESN.
     """
     blob = json.dumps(
         {
             "kind": kind,
+            "flat_layout": "component-first",
             "r": r,
             "seed": seed,
             "n_train": int(n_train),
@@ -241,68 +243,6 @@ def _ae_hash(kind, r, seed, args, n_train) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
-
-
-def _save_projector(p, path):
-    """Persist a fitted AE/CAE: state dicts plus the fitted numpy attributes."""
-    import torch
-
-    conv = hasattr(p, "dec_conv")
-    nets = ["enc_conv", "enc_fc", "dec_fc", "dec_conv"] if conv else ["encoder", "decoder"]
-    torch.save(
-        {
-            "cls": type(p).__name__,
-            "conv": conv,
-            "N_latent": p.N_latent,
-            "layer_dims": getattr(p, "layer_dims", None),
-            "channels": getattr(p, "channels", None),
-            "grid_shape": p.grid_shape,
-            "fluid_mask_flat": p.fluid_mask_flat,
-            "Q_mean": p.Q_mean,
-            "scale": p._scale,
-            "loss_history": p.loss_history,
-            "val_loss_history": getattr(p, "val_loss_history", []),
-            "n_epochs_run": getattr(p, "n_epochs_run", None),
-            "state": {n: getattr(p, n).state_dict() for n in nets},
-        },
-        path,
-    )
-
-
-def _load_projector(path, device):
-    """Rebuild a fitted AE/CAE from ``_save_projector``. Returns None on mismatch."""
-    import torch
-
-    from models.data_driven.autoencoders import AE, CAE
-
-    d = torch.load(path, map_location=device, weights_only=False)
-    cls = {"AE": AE, "CAE": CAE}[d["cls"]]
-    kw = {"device": device}
-    if d["layer_dims"] is not None and not d["conv"]:
-        kw["layer_dims"] = d["layer_dims"]
-    if d["channels"] is not None and d["conv"]:
-        kw["channels"] = d["channels"]
-    p = cls(n_latent=d["N_latent"], **kw)
-    p.grid_shape = d["grid_shape"]
-    p.fluid_mask_flat = d["fluid_mask_flat"]
-    p.Q_mean = d["Q_mean"]
-    p._scale = d["scale"]
-
-    Nu, Nx, Ny = d["grid_shape"]
-    if d["conv"]:
-        p._build_networks(Nu, Nx, Ny)
-        nets = ["enc_conv", "enc_fc", "dec_fc", "dec_conv"]
-    else:
-        p._build_networks(d["Q_mean"].shape[0])
-        nets = ["encoder", "decoder"]
-    for n in nets:
-        getattr(p, n).load_state_dict(d["state"][n])
-        getattr(p, n).to(device).eval()
-    p.loss_history = d["loss_history"]
-    p.val_loss_history = d["val_loss_history"]
-    p.n_epochs_run = d["n_epochs_run"]
-    p.fitted = True
-    return p
 
 
 class Latents:
@@ -341,7 +281,7 @@ class Latents:
 
         if kind == "pod":
             Psi, _, qm = self.pod_basis(r)
-            Latent = backend_classes(self.args.backend)[3]
+            Latent = backend_classes(self.args.backend)[2]
             lat = Latent(Psi, qm) if self.args.backend == "jax" else Latent(Psi, qm, device=self.dev)
         else:
             lat = TorchLatent(self._autoencoder(kind, r, seed), device=self.dev)
@@ -350,12 +290,14 @@ class Latents:
 
     def _autoencoder(self, kind, r, seed):
         a = self.args
-        path = os.path.join(a.cache_dir, f"{kind}_r{r}_s{seed}_{_ae_hash(kind, r, seed, a, len(self.tr))}.pt")
-        if os.path.exists(path) and not a.no_cache:
-            print(f"  {kind.upper()} r={r} seed={seed}: cached", flush=True)
-            return _load_projector(path, self.dev)
-
+        name = f"{kind}_r{r}_s{seed}_{_ae_hash(kind, r, seed, a, len(self.tr))}"
         from models.data_driven.autoencoders import AE, CAE
+
+        if not a.no_cache:
+            cached = load_model_from_config(q=name, load_dir=a.cache_dir, device=self.dev)
+            if isinstance(cached, AE | CAE):
+                print(f"  {kind.upper()} r={r} seed={seed}: cached", flush=True)
+                return cached
 
         grid = self.unflat(self.Q[:, self.tr], dtype=np.float32)
         t0 = time.time()
@@ -383,10 +325,10 @@ class Latents:
         print(
             f"  {kind.upper()} r={r} seed={seed}: {time.time() - t0:.1f}s, "
             f"{p.n_params / 1e6:.1f}M params, "
-            f"{getattr(p, 'n_epochs_run', a.ae_epochs)} epochs",
+            f"{p.training_history.n_epochs_run} epochs",
             flush=True,
         )
-        _save_projector(p, path)
+        save_model_to_config(p, save_dir=a.cache_dir, name=name)
         return p
 
 
@@ -394,13 +336,13 @@ class Latents:
 
 
 BACKENDS = {
-    "torch": ("PODLSE", "ExtendedPOD", "BranchedAE", "LinearLatent"),
-    "jax": ("PODLSEJax", "ExtendedPODJax", "BranchedAEJax", "LinearLatentJax"),
+    "torch": ("PODLSE", "BranchedAE", "LinearLatent"),
+    "jax": ("PODLSEJax", "BranchedAEJax", "LinearLatentJax"),
 }
 
 
 def backend_classes(backend: str):
-    """Returns (PODLSE, ExtendedPOD, BranchedAE, LinearLatent) for a backend."""
+    """Returns (PODLSE, BranchedAE, LinearLatent) for a backend."""
     import field_estimation
 
     return tuple(getattr(field_estimation, n) for n in BACKENDS[backend])
@@ -408,7 +350,7 @@ def backend_classes(backend: str):
 
 def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
     """Fit and score one configuration. Returns a CSV row."""
-    Lin, Ext, Branch, _ = backend_classes(args.backend)
+    Lin, Branch, _ = backend_classes(args.backend)
     ch = _channels(S, cfg["channels"])
     Sd = delay_embed(S[ch], cfg["n_delays"], args.delay_stride, args.delay_ahead)
     t0 = time.time()
@@ -426,7 +368,7 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
             lat_err = nmse(m.project(Q[:, te]), m.encode(Sd[:, te]))
             floor = m.floor(Q[:, te])
         else:
-            m = Ext(r_sensor=r_s, ridge=cfg["ridge"]).fit(Q[:, tr], Sd[:, tr])
+            m = Lin(r_field=None, r_sensor=r_s, ridge=cfg["ridge"]).fit(Q[:, tr], Sd[:, tr])
             lat_err = float("nan")
             Psi, _, qm = latents.pod_basis(cfg["r_field"])
             floor = projection_floor(Q[:, te], Psi, qm)

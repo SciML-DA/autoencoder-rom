@@ -77,6 +77,14 @@ TRAIN = {
 # ── model construction ────────────────────────────────────────────────────────
 
 
+def epochs_and_val(m) -> tuple[int, list[float]]:
+    """Epochs run and validation losses; the originals keep them as separate attributes."""
+    history = getattr(m, "training_history", None)
+    if history is not None:
+        return history.n_epochs_run, list(history.val)
+    return int(m.n_epochs_run), list(getattr(m, "val_loss_history", []))
+
+
 def build(impl: str, model: str, k: int, n_epochs: int, val_fraction: float, device: str):
     kw = {**TRAIN, "n_epochs": n_epochs, "val_fraction": val_fraction}
     arch = {"layer_dims": HIDDEN(k)} if model == "AE" else dict(CONV)
@@ -85,7 +93,7 @@ def build(impl: str, model: str, k: int, n_epochs: int, val_fraction: float, dev
         if impl == "torch_orig":
             from ae_orig import autoencoders as mod
         else:
-            from ae_new import ae as mod
+            from ae_new.autoencoders import ae as mod
         cls = getattr(mod, model)
         kw = {**kw, **arch, "activation_function": "tanh", "device": device}
         # the torch classes drop unknown kwargs silently, so check here
@@ -97,9 +105,9 @@ def build(impl: str, model: str, k: int, n_epochs: int, val_fraction: float, dev
     if impl == "jax_orig":
         from ae_orig import autoencoders_jax as mod
     elif model == "AE":
-        from ae_new import ae_jax as mod
+        from ae_new.autoencoders import ae_jax as mod
     else:
-        from ae_new import cae_jax as mod
+        from ae_new.autoencoders import cae_jax as mod
     if model == "AE":
         arch = {"hidden": HIDDEN(k)}
     return getattr(mod, model + "Jax")(n_latent=k, activation="tanh", threshold=1e-4, **arch, **kw)
@@ -161,18 +169,18 @@ def cmd_worker(a) -> None:
     if a.repeats < 1:
         raise ValueError("--repeats must be >= 1")
     m, t_warm = fit(a.warm)
-    warm_epochs = max(int(m.n_epochs_run), 1)
+    warm_epochs = max(epochs_and_val(m)[0], 1)
 
     times, epochs = [], []
     for _ in range(a.repeats):
         del m
         m, t = fit(a.epochs)
         times.append(t)
-        epochs.append(int(m.n_epochs_run))
+        epochs.append(epochs_and_val(m)[0])
 
     s_ep = [t / max(e, 1) for t, e in zip(times, epochs)]
     med = statistics.median(s_ep)
-    val = [float(v) for v in getattr(m, "val_loss_history", [])]
+    val = [float(v) for v in epochs_and_val(m)[1]]
     row = {
         "impl": a.impl,
         "model": a.model,

@@ -125,6 +125,7 @@ select = [
 ]
 ignore = [
     "E501",  
+    "N801",  # class names such as POD_ESN and ESN_model follow romda
     "N802",  # function name should be lowercase 
     "N803",  # argument name should be lowercase 
     "N806",  # variable in function should be lowercase 

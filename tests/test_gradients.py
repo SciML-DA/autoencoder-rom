@@ -67,7 +67,7 @@ def grid_data(seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_ae_jax_gradient(seed):
     Q = np.nan_to_num(grid_data(seed)).reshape(2, 40, -1).transpose(0, 2, 1).reshape(-1, 40)
-    cfg = AEJaxConfig(n_latent=4, hidden=(16,), dtype=jnp.float64, n_x=Q.shape[0], seed=seed)
+    cfg = AEJaxConfig(n_x=Q.shape[0], hidden=(16,), n_latent=4, dtype=jnp.float64)
     params = get_ae_params(jax.random.key(seed), cfg)
     x = jnp.asarray(Q.T[:16], dtype=jnp.float64)
     assert jax_relative_error(lambda p, b: mse_loss(p, b, cfg), params, x) < 1e-6
@@ -79,7 +79,9 @@ def test_cae_jax_gradient(seed):
     Nu, n_t, Nx, Ny = X.shape
     fluid = ~np.isnan(X[0, 0]).ravel()
     Q = X.reshape(Nu, n_t, -1)[:, :, fluid].transpose(0, 2, 1).reshape(-1, n_t)
-    cfg = CAEJaxConfig(n_latent=4, channels=(4, 8), dtype=jnp.float64, grid_shape=(Nu, Nx, Ny), seed=seed)
+    cfg = CAEJaxConfig(
+        grid_shape=(Nu, Nx, Ny), channels=(4, 8), kernel_size=3, stride=2, pad=1, n_latent=4, dtype=jnp.float64
+    )
     mask = jnp.asarray(fluid.reshape(Nx, Ny), dtype=jnp.float64)[None, None]
     G = flat_to_grid(Q, cfg, np.flatnonzero(fluid))[:8]
     params = get_cae_params(jax.random.key(seed), cfg)
