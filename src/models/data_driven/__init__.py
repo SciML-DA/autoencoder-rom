@@ -4,12 +4,13 @@ A latent ROM pairs a projector, which reduces flow snapshots to latent
 coefficients, with a forecaster, which advances those coefficients in time.
 
     autoencoders/   projectors: POD, SPOD, AE, CAE, AEJax, CAEJax
-    forecasters/    forecasters: ESN_model, LSTM, LSTM_model
+    forecasters/    forecasters: ESN_model, LSTM, LSTMJax, LSTM_model
     roms/           ROMs: POD, AE, CAE, AEJax, and CAEJax, each with ESN or LSTM
     latent_rom.py   LatentROM, the base class the ROMs share
 
 This package re-exports the forecasters and ROMs. Importing it imports neither
-torch nor JAX; the autoencoder ROMs load their modules on first access.
+torch nor JAX; the autoencoder ROMs and `LSTMJax` load their modules on first
+access.
 
 Typical usage example:
 
@@ -38,6 +39,7 @@ __all__ = [
     "CAE_ESN",
     "CAE_LSTM",
     "LSTM",
+    "LSTMJax",
     "POD_ESN",
     "POD_LSTM",
     "ESN_model",
@@ -53,19 +55,21 @@ _LAZY = ("AE_ESN", "CAE_ESN", "AE_LSTM", "CAE_LSTM", "AEJax_ESN", "CAEJax_ESN", 
 
 
 def __getattr__(name: str) -> Any:
-    """Loads an autoencoder ROM the first time it is accessed.
+    """Loads an autoencoder ROM or `LSTMJax` the first time it is accessed.
 
     Args:
       name: Attribute name.
 
     Returns:
-      The named ROM class.
+      The named class.
 
     Raises:
       AttributeError: If the package exports no attribute called `name`.
     """
     if name in _LAZY:
         return getattr(roms, name)
+    if name == "LSTMJax":
+        return forecasters.LSTMJax
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

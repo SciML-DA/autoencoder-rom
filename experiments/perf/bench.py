@@ -86,8 +86,10 @@ def epochs_and_val(m) -> tuple[int, list[float]]:
 
 
 def build(impl: str, model: str, k: int, n_epochs: int, val_fraction: float, device: str):
-    kw = {**TRAIN, "n_epochs": n_epochs, "val_fraction": val_fraction}
-    arch = {"layer_dims": HIDDEN(k)} if model == "AE" else dict(CONV)
+    # The originals name three options differently.
+    orig = impl.endswith("_orig")
+    kw = {**TRAIN, ("n_epochs" if orig else "epochs"): n_epochs, "val_fraction": val_fraction}
+    arch = {("layer_dims" if orig else "hidden"): HIDDEN(k)} if model == "AE" else dict(CONV)
 
     if impl.startswith("torch"):
         if impl == "torch_orig":
@@ -95,7 +97,7 @@ def build(impl: str, model: str, k: int, n_epochs: int, val_fraction: float, dev
         else:
             from ae_new.autoencoders import ae as mod
         cls = getattr(mod, model)
-        kw = {**kw, **arch, "activation_function": "tanh", "device": device}
+        kw = {**kw, **arch, ("activation_function" if orig else "activation"): "tanh", "device": device}
         # the torch classes drop unknown kwargs silently, so check here
         unknown = [x for x in kw if not hasattr(cls, x)]
         if unknown:

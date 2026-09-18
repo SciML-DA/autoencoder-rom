@@ -376,7 +376,7 @@ class JaxAutoencoder[P](Autoencoder):
         sched_best, sched_bad = np.inf, 0
         history = TrainingHistory()
 
-        for _ in range(self.n_epochs):
+        for _ in range(self.epochs):
             key, shuffle_key = jax.random.split(key)
             batches = epoch_batches(shuffle_key, X_tr.shape[0], self.batch_size)
             total = jnp.zeros((), dtype=data.dtype)

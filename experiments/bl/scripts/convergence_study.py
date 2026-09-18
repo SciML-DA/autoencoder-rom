@@ -55,7 +55,7 @@ DATASETS = {
 
 TRAIN_DEFAULTS = {
     "learning_rate": 1e-3,
-    "n_epochs": 600,
+    "epochs": 600,
     "weight_decay": 1e-6,
     # patience has to cover every LR decay down to min_lr, see check_schedule
     "patience": 80,
@@ -137,7 +137,7 @@ def build_models(
         "val_fraction": val_fraction,
     }
     if n_epochs is not None:
-        train["n_epochs"] = n_epochs
+        train["epochs"] = n_epochs
     hidden = resolve_hidden(spec, n_latent)
     # torch's ReduceLROnPlateau uses threshold=1e-4 by default; the JAX config
     # exposes it, so set it explicitly rather than relying on two defaults agreeing
@@ -149,8 +149,8 @@ def build_models(
             n_latent=n_latent,
             **_torch_kwargs(
                 AE,
-                layer_dims=hidden,
-                activation_function="tanh",
+                hidden=hidden,
+                activation="tanh",
                 device=device,
                 **train,
             ),
@@ -160,7 +160,7 @@ def build_models(
             n_latent=n_latent,
             **_torch_kwargs(
                 CAE,
-                activation_function="tanh",
+                activation="tanh",
                 device=device,
                 **spec["conv"],
                 **train,
@@ -438,7 +438,7 @@ def run_convergence_study(
     if dataset not in DATASETS:
         raise ValueError(f"dataset must be one of {sorted(DATASETS)}")
     spec = DATASETS[dataset]
-    epochs = n_epochs if n_epochs is not None else TRAIN_DEFAULTS["n_epochs"]
+    epochs = n_epochs if n_epochs is not None else TRAIN_DEFAULTS["epochs"]
     sched_epochs = check_schedule(TRAIN_DEFAULTS)
 
     out = Path(outdir) / dataset

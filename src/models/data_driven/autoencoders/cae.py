@@ -30,7 +30,7 @@ class CAE(TorchAutoencoder):
     """A convolutional autoencoder on the snapshot grid.
 
     The encoder applies one convolution per entry of `channels`, each followed
-    by `activation_function`, then flattens and maps linearly to `n_latent`
+    by `activation`, then flattens and maps linearly to `n_latent`
     coefficients. The decoder maps linearly back to the bottleneck grid and
     applies the mirrored transposed convolutions, with the last one linear.
     Solid points enter as zeros and are excluded from the loss. `Autoencoder`
@@ -43,7 +43,7 @@ class CAE(TorchAutoencoder):
       pad: Convolution padding.
 
     Raises:
-      ValueError: If an option is out of range, `activation_function` is
+      ValueError: If an option is out of range, `activation` is
         unknown, or `device` is not a valid torch device name.
     """
 
@@ -62,7 +62,7 @@ class CAE(TorchAutoencoder):
         """Validates the options.
 
         Raises:
-          ValueError: If an option is out of range, `activation_function` is
+          ValueError: If an option is out of range, `activation` is
             unknown, or `device` is not a valid torch device name.
         """
         super().__post_init__()

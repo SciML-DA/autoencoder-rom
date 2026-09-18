@@ -2,7 +2,7 @@
 
 Typical usage example:
 
-  ae = AE(n_latent=10, layer_dims=(128, 32)).fit(X)
+  ae = AE(n_latent=10, hidden=(128, 32)).fit(X)
   Z = ae.encode(X)
   Q_hat = ae.decode(Z)
   mse = ae.score(X)
@@ -30,21 +30,21 @@ class AE(TorchAutoencoder):
     """A fully connected autoencoder.
 
     The encoder maps the scaled, zero-mean field through the hidden widths
-    `layer_dims` to `n_latent` coefficients, and the decoder mirrors it. Hidden
-    layers use `activation_function`; the bottleneck and output layers are
-    linear. `Autoencoder` documents the training options.
+    `hidden` to `n_latent` coefficients, and the decoder mirrors it. Hidden
+    layers use `activation`; the bottleneck and output layers are linear.
+    `Autoencoder` documents the training options.
 
     Attributes:
-      layer_dims: Hidden layer widths of the encoder. The decoder uses them in
+      hidden: Hidden layer widths of the encoder. The decoder uses them in
         reverse order.
 
     Raises:
-      ValueError: If an option is out of range, an entry of `layer_dims` is
-        below 1, `activation_function` is unknown, or `device` is not a valid
-        torch device name.
+      ValueError: If an option is out of range, an entry of `hidden` is
+        below 1, `activation` is unknown, or `device` is not a valid torch
+        device name.
     """
 
-    layer_dims: Sequence[int] = (512, 128)
+    hidden: Sequence[int] = (512, 128)
 
     _encoder: nn.Sequential | None = field(default=None, init=False)
     _decoder: nn.Sequential | None = field(default=None, init=False)
@@ -53,14 +53,14 @@ class AE(TorchAutoencoder):
         """Validates the options.
 
         Raises:
-          ValueError: If an option is out of range, an entry of `layer_dims` is
-            below 1, `activation_function` is unknown, or `device` is not a
+          ValueError: If an option is out of range, an entry of `hidden` is
+            below 1, `activation` is unknown, or `device` is not a
             valid torch device name.
         """
         super().__post_init__()
-        self.layer_dims = tuple(self.layer_dims)
-        if any(d < 1 for d in self.layer_dims):
-            raise ValueError(f"layer_dims must all be >= 1, got {self.layer_dims}")
+        self.hidden = tuple(self.hidden)
+        if any(d < 1 for d in self.hidden):
+            raise ValueError(f"hidden must all be >= 1, got {self.hidden}")
 
     # ── Networks ──────────────────────────────────────────────────────────────
 
@@ -104,8 +104,8 @@ class AE(TorchAutoencoder):
     def _build_networks(self) -> None:
         """Creates freshly initialized encoder and decoder networks for the recorded field size."""
         n_x = int(self.Q_mean.shape[0])
-        self._encoder = self._mlp([n_x, *self.layer_dims, self.N_latent]).to(self.device)
-        self._decoder = self._mlp([self.N_latent, *reversed(self.layer_dims), n_x]).to(self.device)
+        self._encoder = self._mlp([n_x, *self.hidden, self.N_latent]).to(self.device)
+        self._decoder = self._mlp([self.N_latent, *reversed(self.hidden), n_x]).to(self.device)
 
     def _mlp(self, dims: Sequence[int]) -> nn.Sequential:
         """Builds linear layers with an activation between consecutive layers.

@@ -309,12 +309,12 @@ class Latents:
             # (512, 128) puts a hidden layer at exactly the latent width, so the
             # bottleneck is no longer uniquely the bottleneck.
             dims = tuple(max(int(f * r), r + 1) for f in a.ae_hidden_scale)
-            cls, kw = AE, {"layer_dims": dims}
+            cls, kw = AE, {"hidden": dims}
         else:
             cls, kw = CAE, {"channels": tuple(a.cae_channels)}
         p = cls(
             n_latent=r,
-            n_epochs=a.ae_epochs,
+            epochs=a.ae_epochs,
             batch_size=a.ae_batch,
             learning_rate=a.ae_lr,
             patience=a.ae_patience,
@@ -391,7 +391,7 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
             weight_decay=cfg["weight_decay"],
             lr_factor=args.lr_factor,
             lr_patience=args.lr_patience,
-            n_epochs=args.epochs,
+            epochs=args.epochs,
             batch_size=args.batch,
             learning_rate=cfg["lr"],
             patience=args.patience,
@@ -437,7 +437,7 @@ def fit_one(cfg, Q, S, tr, te, latents, args, videos, Q_full=None):
     hist = list(getattr(m, "loss_history", []) or [])
     vhist = list(getattr(m, "val_loss_history", []) or [])
     n_ep = len(hist)
-    stopped = bool(n_ep and n_ep < int(getattr(m, "n_epochs", 0) or 0))
+    stopped = bool(n_ep and n_ep < int(getattr(m, "epochs", 0) or 0))
     n_fit = len(tr)
     if cfg["model"] not in ("podlse", "epod"):
         n_fit = int(round(len(tr) * (1.0 - float(getattr(m, "val_fraction", 0.0)))))

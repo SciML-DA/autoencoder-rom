@@ -948,7 +948,7 @@ class BranchedAEJax:
         unchanged; `"unit"` divides each mode by its standard deviation.
       learning_rate: Initial Adam step size.
       weight_decay: Decoupled weight decay coefficient.
-      n_epochs: Maximum number of training epochs.
+      epochs: Maximum number of training epochs.
       batch_size: Minibatch size, capped at the number of training snapshots.
       val_fraction: Fraction of the training block held out for early stopping,
         taken contiguously from the end of the block.
@@ -987,7 +987,7 @@ class BranchedAEJax:
 
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
-    n_epochs: int = 500
+    epochs: int = 500
     batch_size: int = 128
     val_fraction: float = 0.2
     patience: int = 50
@@ -1112,7 +1112,7 @@ class BranchedAEJax:
         n_tr = int(tr_i.shape[0])
         bs = min(self.batch_size, n_tr)
 
-        for ep in range(self.n_epochs):
+        for ep in range(self.epochs):
             key, ks = jax.random.split(key)
             batches = tr_i[_epoch_batches(ks, n_tr, bs)]
             run = 0.0

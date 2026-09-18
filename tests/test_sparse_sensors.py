@@ -500,7 +500,7 @@ def test_branched_linear_matches_podlse(v):
     e_closed = closed.score(c["Q"][:, te], c["S"][:, te])
 
     m = BranchedAE(LinearLatent(Psi, qm, device="cpu"), branch="linear", n_delays=1,
-                   n_epochs=600, patience=120, learning_rate=5e-3, batch_size=256,
+                   epochs=600, patience=120, learning_rate=5e-3, batch_size=256,
                    device="cpu", seed=0).fit(c["Q"], c["S"], tr)
 
     # On the training block the closed form is the exact minimiser, so no
@@ -534,7 +534,7 @@ def test_branch_beats_the_linear_floor(v):
     lat = LinearLatent(Psi, qm, device="cpu")
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e_lin = closed.score(c["Q"][:, te], c["S"][:, te])
-    m = BranchedAE(lat, branch="mlp", n_delays=1, hidden=(64, 64), n_epochs=400,
+    m = BranchedAE(lat, branch="mlp", n_delays=1, hidden=(64, 64), epochs=400,
                    patience=80, batch_size=128, device="cpu", seed=0).fit(c["Q"], c["S"], tr)
     e_nl = m.score(c["Q"], c["S"], te)
     if v:
@@ -557,7 +557,7 @@ def test_torch_latent_wraps_an_autoencoder(v):
 
     c = toy(n_t=400, n_x=16, n_y=12, rank=4)
     X = _grid(c)
-    ae = AE(n_latent=4, layer_dims=(64, 32), n_epochs=40, batch_size=32,
+    ae = AE(n_latent=4, hidden=(64, 32), epochs=40, batch_size=32,
             device="cpu", seed=0).fit(X)
     lat = TorchLatent(ae, device="cpu")
     Z = lat.encode(X)
@@ -583,8 +583,8 @@ def test_autoencoder_latent_jax_wraps_both_autoencoders(v):
     c = toy(n_t=400, n_x=16, n_y=12, rank=4)
     X = _grid(c)
     for p in (
-        AEJax(n_latent=4, hidden=(32,), n_epochs=20, dtype=jnp.float64, seed=0),
-        CAEJax(n_latent=4, channels=(4, 8), n_epochs=20, dtype=jnp.float64, seed=0),
+        AEJax(n_latent=4, hidden=(32,), epochs=20, dtype=jnp.float64, seed=0),
+        CAEJax(n_latent=4, channels=(4, 8), epochs=20, dtype=jnp.float64, seed=0),
     ):
         p.fit(X)
         lat = AutoencoderLatentJax(p, dtype="float64")
@@ -609,11 +609,11 @@ def test_branched_jax_trains_with_an_autoencoder_field_term(v):
 
     c = toy(response="quadratic", n_t=600, n_x=16, n_y=12, rank=4)
     tr, _, te = split_indices(c["Q"].shape[1], val_frac=0, test_frac=0.25, gap=20)
-    ae = AEJax(n_latent=4, hidden=(32,), n_epochs=20, dtype=jnp.float64, seed=0).fit(_grid(c))
+    ae = AEJax(n_latent=4, hidden=(32,), epochs=20, dtype=jnp.float64, seed=0).fit(_grid(c))
 
     losses = {}
     for lam in (0.0, 0.1):
-        m = BranchedAEJax(AutoencoderLatentJax(ae), branch="mlp", n_delays=1, lambda_field=lam, n_epochs=30, seed=0)
+        m = BranchedAEJax(AutoencoderLatentJax(ae), branch="mlp", n_delays=1, lambda_field=lam, epochs=30, seed=0)
         m.fit(c["Q"], c["S"], tr)
         assert np.isfinite(m.score(c["Q"], c["S"], te))
         losses[lam] = m.loss_history[-1]
@@ -664,9 +664,9 @@ def test_jax_float32_stays_float32_with_x64(v):
     X = _grid(c)
     Psi, _, _, qm = pod(c["Q"], 4, subtract_mean=True)
     models = {
-        "AEJax": AEJax(n_latent=4, hidden=(16,), n_epochs=2, dtype=jnp.float32).fit(X),
-        "CAEJax": CAEJax(n_latent=4, channels=(4, 8), n_epochs=2, dtype=jnp.float32).fit(X),
-        "BranchedAEJax": BranchedAEJax(LinearLatentJax(Psi, qm), n_delays=1, n_epochs=2).fit(
+        "AEJax": AEJax(n_latent=4, hidden=(16,), epochs=2, dtype=jnp.float32).fit(X),
+        "CAEJax": CAEJax(n_latent=4, channels=(4, 8), epochs=2, dtype=jnp.float32).fit(X),
+        "BranchedAEJax": BranchedAEJax(LinearLatentJax(Psi, qm), n_delays=1, epochs=2).fit(
             c["Q"], c["S"], np.arange(200)
         ),
     }
@@ -686,7 +686,7 @@ def test_forecaster_beats_persistence(v):
     Psi, _, B, _ = pod(c["Q"], 4, subtract_mean=True)
     tr = np.arange(2200)
     f = LatentForecaster(n_latent=4, n_delays=20, n_unroll=5, hidden=48,
-                         n_epochs=120, patience=25, device="cpu", seed=0).fit(B, tr)
+                         epochs=120, patience=25, device="cpu", seed=0).fit(B, tr)
     h = 40
     errs, pers = [], []
     for t0 in range(2400, 2900, 50):

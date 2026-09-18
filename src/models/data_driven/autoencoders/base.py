@@ -365,7 +365,7 @@ class Autoencoder(Projector, Configurable):
     Attributes:
       n_latent: Dimension of the latent space. `N_latent` holds the same value.
       learning_rate: Initial Adam step size.
-      n_epochs: Maximum number of training epochs.
+      epochs: Maximum number of training epochs.
       batch_size: Minibatch size.
       val_fraction: Fraction of the snapshots held out for validation, taken
         from the end of the record. 0 trains on every snapshot and disables
@@ -389,7 +389,7 @@ class Autoencoder(Projector, Configurable):
 
     n_latent: int = 10
     learning_rate: float = 1e-3
-    n_epochs: int = 500
+    epochs: int = 500
     batch_size: int = 32
     val_fraction: float = 0.2
     weight_decay: float = 0.0
@@ -421,8 +421,8 @@ class Autoencoder(Projector, Configurable):
             raise ValueError(f"n_latent must be >= 1, got {self.n_latent}")
         if self.learning_rate <= 0:
             raise ValueError(f"learning_rate must be > 0, got {self.learning_rate}")
-        if self.n_epochs < 1:
-            raise ValueError(f"n_epochs must be >= 1, got {self.n_epochs}")
+        if self.epochs < 1:
+            raise ValueError(f"epochs must be >= 1, got {self.epochs}")
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
         if not 0.0 <= self.val_fraction < 1.0:

@@ -47,17 +47,17 @@ class TorchAutoencoder(Autoencoder):
     """Options and training loop shared by `AE` and `CAE`.
 
     Attributes:
-      activation_function: Hidden layer activation. One of `"tanh"`, `"relu"`,
+      activation: Hidden layer activation. One of `"tanh"`, `"relu"`,
         `"elu"`, or `"identity"`.
       device: Torch device name, such as `"cpu"` or `"cuda"`. Saved
         configurations leave it out; pass it when restoring.
 
     Raises:
-      ValueError: If an option is out of range, `activation_function` is
+      ValueError: If an option is out of range, `activation` is
         unknown, or `device` is not a valid torch device name.
     """
 
-    activation_function: str = "tanh"
+    activation: str = "tanh"
     device: str = "cpu"
 
     _config_exclude: ClassVar[tuple[str, ...]] = ("grid_shape", "device")
@@ -66,13 +66,13 @@ class TorchAutoencoder(Autoencoder):
         """Validates the options.
 
         Raises:
-          ValueError: If an option is out of range, `activation_function` is
+          ValueError: If an option is out of range, `activation` is
             unknown, or `device` is not a valid torch device name.
         """
         super().__post_init__()
-        if self.activation_function not in ACTIVATIONS:
+        if self.activation not in ACTIVATIONS:
             raise ValueError(
-                f"activation_function must be one of {sorted(ACTIVATIONS)}, got {self.activation_function!r}"
+                f"activation must be one of {sorted(ACTIVATIONS)}, got {self.activation!r}"
             )
         try:
             torch.device(self.device)
@@ -111,7 +111,7 @@ class TorchAutoencoder(Autoencoder):
 
     def _activation(self) -> nn.Module:
         """Creates one instance of the hidden layer activation."""
-        return ACTIVATIONS[self.activation_function]()
+        return ACTIVATIONS[self.activation]()
 
     def _train(
         self, nets: Sequence[nn.Module], loss_fn: LossFn, X_tr: torch.Tensor, X_val: torch.Tensor
@@ -141,7 +141,7 @@ class TorchAutoencoder(Autoencoder):
         best_val, wait, have_best = float("inf"), 0, False
         history = TrainingHistory()
 
-        for _ in range(self.n_epochs):
+        for _ in range(self.epochs):
             history.lr.append(float(opt.param_groups[0]["lr"]))
             history.train.append(self._train_epoch(nets, loss_fn, opt, X_tr))
             if X_val.shape[0] == 0:

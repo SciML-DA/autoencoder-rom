@@ -221,6 +221,8 @@ class LatentROM(Projector):
         skip_sensor_placement: bool = False,
         domain_of_measurement: Sequence[float] | None = None,
         down_sample_measurement: int | Sequence[int] | None = None,
+        projector_epochs: int | None = None,
+        forecaster_epochs: int | None = None,
         **kwargs: Any,
     ) -> None:
         """Fits the projector, trains the forecaster, and places sensors.
@@ -238,18 +240,38 @@ class LatentROM(Projector):
             to. `None` allows the whole grid.
           down_sample_measurement: Stride over the measurement grid, one value
             for both axes or one per axis.
+          projector_epochs: Training epochs of the projector. `None` keeps the
+            projector's default.
+          forecaster_epochs: Training epochs of the forecaster. `None` keeps
+            the forecaster's default.
           **kwargs: Options of this class (see Attributes), of the projector,
             and of the forecaster. Each goes to the class that defines it; the
             rest go to the forecaster.
+
+        Raises:
+          TypeError: If `kwargs` holds `epochs`, or an epoch count is given for
+            a projector or forecaster that does not train in epochs.
         """
         if train_ESN is not None:
             train_forecaster = train_ESN
         for key in self._options:
             if key in kwargs:
                 setattr(self, key, kwargs.pop(key))
+        if "epochs" in kwargs:
+            raise TypeError(f"{type(self).__name__} takes projector_epochs and forecaster_epochs, not epochs")
         projector_kwargs = {
             k: kwargs.pop(k) for k in list(kwargs) if k in ("n_latent", "n_modes") or hasattr(self._projector_cls, k)
         }
+        for count, cls, role in (
+            (projector_epochs, self._projector_cls, "projector"),
+            (forecaster_epochs, self._forecaster_cls, "forecaster"),
+        ):
+            if count is not None and not hasattr(cls, "epochs"):
+                raise TypeError(f"{cls.__name__} does not train in epochs; drop {role}_epochs")
+        if projector_epochs is not None:
+            projector_kwargs["epochs"] = projector_epochs
+        if forecaster_epochs is not None:
+            kwargs["epochs"] = forecaster_epochs
 
         projector: Any = self._projector_cls
         self._constructing = projector

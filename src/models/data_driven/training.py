@@ -3,7 +3,7 @@
 Typical usage example:
 
   history = TrainingHistory()
-  for epoch in range(n_epochs):
+  for epoch in range(epochs):
       history.train.append(train_loss)
       history.val.append(val_loss)
       history.lr.append(lr)

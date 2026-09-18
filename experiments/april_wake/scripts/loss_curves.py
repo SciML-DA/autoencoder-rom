@@ -84,8 +84,8 @@ def build_latents(Q, tr, unflat, args):
         t0 = time.time()
         p = AE(
             n_latent=args.r_field,
-            layer_dims=dims,
-            n_epochs=args.ae_epochs,
+            hidden=dims,
+            epochs=args.ae_epochs,
             batch_size=args.ae_batch,
             learning_rate=args.ae_lr,
             patience=args.ae_patience,
@@ -121,7 +121,7 @@ def fit_one(Q, S, tr, te, lat, args, latent_name, branch):
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
         sensor_noise=args.sensor_noise,
-        n_epochs=args.epochs,
+        epochs=args.epochs,
         batch_size=args.batch,
         val_fraction=args.val_fraction,
         patience=args.patience,

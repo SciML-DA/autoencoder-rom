@@ -536,7 +536,7 @@ def branched_linear_matches_podlse(v):
         LinearLatent(Psi, qm, device="cpu"),
         branch="linear",
         n_delays=1,
-        n_epochs=600,
+        epochs=600,
         patience=120,
         learning_rate=5e-3,
         batch_size=256,
@@ -579,7 +579,7 @@ def branch_beats_the_linear_floor(v):
     closed = PODLSE(r_field=c["rank"], r_sensor=None).fit(c["Q"][:, tr], c["S"][:, tr])
     e_lin = closed.score(c["Q"][:, te], c["S"][:, te])
     m = BranchedAE(
-        lat, branch="mlp", n_delays=1, hidden=(64, 64), n_epochs=400, patience=80, batch_size=128, device="cpu", seed=0
+        lat, branch="mlp", n_delays=1, hidden=(64, 64), epochs=400, patience=80, batch_size=128, device="cpu", seed=0
     ).fit(c["Q"], c["S"], tr)
     e_nl = m.score(c["Q"], c["S"], te)
     if v:
@@ -607,7 +607,7 @@ def torch_latent_wraps_an_autoencoder(v):
 
     c = toy(n_t=400, n_x=16, n_y=12, rank=4)
     X = _grid(c)
-    ae = AE(n_latent=4, layer_dims=(64, 32), n_epochs=40, batch_size=32, device="cpu", seed=0).fit(X)
+    ae = AE(n_latent=4, hidden=(64, 32), epochs=40, batch_size=32, device="cpu", seed=0).fit(X)
     lat = TorchLatent(ae, device="cpu")
     Z = lat.encode(X)
     a = lat.decode(Z)
@@ -634,7 +634,7 @@ def forecaster_beats_persistence(v):
     Psi, _, B, _ = pod(c["Q"], 4, subtract_mean=True)
     tr = np.arange(2200)
     f = LatentForecaster(
-        n_latent=4, n_delays=20, n_unroll=5, hidden=48, n_epochs=120, patience=25, device="cpu", seed=0
+        n_latent=4, n_delays=20, n_unroll=5, hidden=48, epochs=120, patience=25, device="cpu", seed=0
     ).fit(B, tr)
     h = 40
     errs, pers = [], []

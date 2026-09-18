@@ -153,7 +153,7 @@ def test_autoencoder_rom_end_to_end(data, name):
     cls = getattr(dd, name)
     m = cls(data=data, dt=0.01, n_latent=6, grid_shape=GRID, domain=DOMAIN,
             Nq=8, seed=0, N_units=30, N_wash=5, N_func_evals=4, N_grid=2,
-            n_epochs=30, perform_test=False)
+            projector_epochs=30, perform_test=False)
 
     # the projector actually learned something
     Q = m.preprocess_snapshot(data)
@@ -196,7 +196,7 @@ def test_ntsa_protocol_surface(data, name):
     if name == "POD_ESN":
         m = dd.POD_ESN(n_modes=6, method="exact", random_state=0, **common)
     else:
-        m = dd.AE_ESN(n_latent=6, n_epochs=30, **common)
+        m = dd.AE_ESN(n_latent=6, projector_epochs=30, **common)
 
     for attr in ("Nphi", "Nq", "psi0", "alpha0", "params", "fixed_params",
                  "dt", "t_transient", "t_CR", "obs_labels", "alpha_labels", "name"):
@@ -222,7 +222,7 @@ def test_lstm_model_state_layout_and_step_contract(data):
 
     m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
                  grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-                 epochs=2, seq_len=50)
+                 forecaster_epochs=2, seq_len=50)
 
     assert m.Nphi == 6 + 2 * 16, "psi must be [latent ; h ; c]"
     psi, t = m.time_step(Nt=10)
@@ -236,6 +236,19 @@ def test_lstm_model_state_layout_and_step_contract(data):
     m.close()
 
 
+def test_rom_epoch_keywords_name_their_model(data):
+    """ROMs take projector_epochs and forecaster_epochs, and reject the ambiguous epochs."""
+    from models.data_driven import AE_LSTM, POD_ESN, POD_LSTM
+
+    common = dict(data=data, dt=0.01, grid_shape=GRID, domain=DOMAIN, Nq=8)
+    with pytest.raises(TypeError, match="projector_epochs and forecaster_epochs"):
+        AE_LSTM(n_latent=6, epochs=5, **common)
+    with pytest.raises(TypeError, match="POD does not train in epochs"):
+        POD_LSTM(n_modes=6, projector_epochs=5, **common)
+    with pytest.raises(TypeError, match="ESN_model does not train in epochs"):
+        POD_ESN(n_modes=6, forecaster_epochs=5, **common)
+
+
 @slow
 @pytest.mark.parametrize("name", ["POD_LSTM", "AE_LSTM", "AEJax_LSTM"])
 def test_rom_keeps_projector_and_forecaster_histories(data, name):
@@ -243,9 +256,9 @@ def test_rom_keeps_projector_and_forecaster_histories(data, name):
     import models.data_driven as dd
 
     kw = dict(data=data, dt=0.01, grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-              epochs=2, seq_len=50)
+              forecaster_epochs=2, seq_len=50)
     kw |= (dict(n_modes=6, method="exact", random_state=0) if "POD" in name
-           else dict(n_latent=6, n_epochs=5, seed=3))
+           else dict(n_latent=6, projector_epochs=5, seed=3))
     m = getattr(dd, name)(**kw)
 
     assert m.forecaster_history is not None and m.forecaster_history.n_epochs_run == 2
@@ -265,9 +278,9 @@ def test_lstm_roms_place_sensors_and_forecast(data, name):
 
     cls = getattr(dd, name)
     kw = dict(data=data, dt=0.01, grid_shape=GRID, domain=DOMAIN, Nq=8,
-              N_units=16, N_wash=5, epochs=2, seq_len=50)
+              N_units=16, N_wash=5, forecaster_epochs=2, seq_len=50)
     kw |= (dict(n_modes=6, method="exact", random_state=0) if "POD" in name
-           else dict(n_latent=6, n_epochs=20))
+           else dict(n_latent=6, projector_epochs=20))
     m = cls(**kw)
 
     assert m.Nq == len(m.sensor_locations) == 8 * GRID[0]
@@ -286,7 +299,7 @@ def test_lstm_model_forecasts_each_ensemble_member(data):
 
     m = POD_LSTM(data=data, dt=0.01, n_modes=6, method="exact", random_state=0,
                  grid_shape=GRID, domain=DOMAIN, Nq=8, N_units=16, N_wash=5,
-                 epochs=2, seq_len=50)
+                 forecaster_epochs=2, seq_len=50)
     single, _ = m.time_step(Nt=5)
 
     u0 = m.current_state[:m.N_dim]
@@ -319,7 +332,7 @@ def test_observables_read_the_decoded_field_at_the_sensors(data, name):
     import models.data_driven as dd
 
     kw = (dict(n_modes=6, method="exact", random_state=0) if name == "POD_ESN"
-          else dict(n_latent=4, n_epochs=10))
+          else dict(n_latent=4, projector_epochs=10))
     m = getattr(dd, name)(data=_masked(data), dt=0.01, grid_shape=GRID, domain=DOMAIN,
                           Nq=6, seed=0, train_forecaster=False, **kw)
     Z = m.latent_training_trajectory[:, :5]
@@ -350,7 +363,7 @@ def test_reset_case_resets_the_forecaster(data, name):
     """reset_case(reset_forecaster=True) restarts from the first training snapshot."""
     import models.data_driven as dd
 
-    kw = (dict(N_func_evals=4, N_grid=2) if name == "POD_ESN" else dict(epochs=2, seq_len=50))
+    kw = (dict(N_func_evals=4, N_grid=2) if name == "POD_ESN" else dict(forecaster_epochs=2, seq_len=50))
     m = getattr(dd, name)(data=data, dt=0.01, n_modes=6, method="exact", random_state=0, grid_shape=GRID,
                           domain=DOMAIN, Nq=8, seed=0, N_units=16, N_wash=5, **kw)
     p, t = m.time_integrate(Nt=5)

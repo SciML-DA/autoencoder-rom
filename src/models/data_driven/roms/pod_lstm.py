@@ -2,7 +2,7 @@
 
 Typical usage example:
 
-  rom = POD_LSTM(data=X, dt=0.01, n_modes=10, Nq=8, N_units=64, epochs=40)
+  rom = POD_LSTM(data=X, dt=0.01, n_modes=10, Nq=8, N_units=64, forecaster_epochs=40)
   psi, t = rom.time_integrate(Nt=200)
 """
 

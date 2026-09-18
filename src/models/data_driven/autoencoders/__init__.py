@@ -15,7 +15,7 @@ Typical usage example:
   from models.data_driven.autoencoders import AE, POD
 
   pod = POD(n_modes=20).fit(X)
-  ae = AE(n_latent=20, layer_dims=(256, 64)).fit(X)
+  ae = AE(n_latent=20, hidden=(256, 64)).fit(X)
   errors = pod.score(X_test), ae.score(X_test)
 """
 

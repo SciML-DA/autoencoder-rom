@@ -671,7 +671,7 @@ class BranchedAE:
       sensor_noise: Standard deviation of the Gaussian noise added to each
         training minibatch of sensor windows, in units of the standardized
         channel. Validation and prediction use unchanged batches.
-      n_epochs: Maximum number of training epochs.
+      epochs: Maximum number of training epochs.
       batch_size: Minibatch size.
       val_fraction: Fraction of the training block held out for early stopping,
         taken contiguously from the end of the block.
@@ -724,7 +724,7 @@ class BranchedAE:
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     sensor_noise: float = 0.0
-    n_epochs: int = 500
+    epochs: int = 500
     batch_size: int = 128
     val_fraction: float = 0.2
     patience: int = 50
@@ -868,7 +868,7 @@ class BranchedAE:
         self.track_history = {}
         n = Xtr.shape[0]
 
-        for ep in range(self.n_epochs):
+        for ep in range(self.epochs):
             G.train()
             order = torch.randperm(n, device=dev)
             run = 0.0
@@ -894,7 +894,7 @@ class BranchedAE:
 
             self.loss_history.append(run / n)
 
-            if self.track_sets and (ep % max(self.track_every, 1) == 0 or ep == self.n_epochs - 1):
+            if self.track_sets and (ep % max(self.track_every, 1) == 0 or ep == self.epochs - 1):
                 G.eval()
                 # `predict` requires a fitted estimator. The flag is set for
                 # good at the end of `fit`.
@@ -1119,7 +1119,7 @@ class LatentForecaster:
       layers: Number of stacked GRU layers.
       n_unroll: Steps to unroll during training.
       learning_rate: Adam step size.
-      n_epochs: Maximum number of training epochs.
+      epochs: Maximum number of training epochs.
       batch_size: Minibatch size.
       val_fraction: Fraction of windows held out for early stopping.
       patience: Epochs without improvement before training stops.
@@ -1141,7 +1141,7 @@ class LatentForecaster:
     layers: int = 1
     n_unroll: int = 5
     learning_rate: float = 1e-3
-    n_epochs: int = 300
+    epochs: int = 300
     batch_size: int = 128
     val_fraction: float = 0.2
     patience: int = 40
@@ -1221,7 +1221,7 @@ class LatentForecaster:
         wait = 0
         best_state: dict[str, torch.Tensor] | None = None
         self.loss_history, self.val_loss_history = [], []
-        for ep in range(self.n_epochs):
+        for ep in range(self.epochs):
             self.net.train()
             order = torch.randperm(Xt.shape[0], device=dev)
             run = 0.0

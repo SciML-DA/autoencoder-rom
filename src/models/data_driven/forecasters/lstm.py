@@ -469,31 +469,7 @@ class LSTM(Configurable):
           ValueError: If an override is out of range, or a training segment is
             shorter than `N_wash + seq_len + 1`.
         """
-        for key, value in overrides.items():
-            if key not in _TRAIN_OPTIONS:
-                raise TypeError(f"train() got an unexpected option {key!r}")
-            setattr(self, key, value)
-        self._validate()
-
-        sequences = self._as_sequences(data)
-        n_val = [int(round(self.val_frac * len(U))) for U in sequences]
-        train_raw = [U[: len(U) - n] for U, n in zip(sequences, n_val, strict=True)]
-        val_raw = [
-            U[len(U) - n - self.N_wash :]
-            for U, n in zip(sequences, n_val, strict=True)
-            if n > 0 and len(U) - n >= self.N_wash
-        ]
-        for index, U in enumerate(train_raw):
-            if len(U) < self.N_wash + self.seq_len + 1:
-                raise ValueError(
-                    f"segment {index} has {len(U)} training steps, fewer than "
-                    f"N_wash + seq_len + 1 = {self.N_wash + self.seq_len + 1}"
-                )
-
-        self.norm, self.shift = self._set_norm(train_raw, method=self.norm_method)
-        U_train = [self.normalize_input(U) for U in train_raw]
-        U_val = [self.normalize_input(U) for U in val_raw]
-
+        U_train, U_val = self._training_segments(data, overrides)
         moments = {k: [np.zeros_like(v), np.zeros_like(v)] for k, v in self.p.items()}
         n_steps = 0
         best_loss, best_p = np.inf, None
@@ -537,6 +513,48 @@ class LSTM(Configurable):
         if best_p is not None:
             self.p = best_p
         self._trained = True
+
+    def _training_segments(
+        self, data: npt.ArrayLike | list[npt.ArrayLike], overrides: Mapping[str, Any]
+    ) -> tuple[list[Array], list[Array]]:
+        """Applies overrides, sets the normalization, and splits off validation.
+
+        Args:
+          data: Time series, in any layout `train` accepts.
+          overrides: New option values, as `train` takes them.
+
+        Returns:
+          The normalized training segments, and the normalized validation
+          segments, each beginning with `N_wash` washout steps.
+
+        Raises:
+          TypeError: If an override names another attribute.
+          ValueError: If an override is out of range, or a training segment is
+            shorter than `N_wash + seq_len + 1`.
+        """
+        for key, value in overrides.items():
+            if key not in _TRAIN_OPTIONS:
+                raise TypeError(f"train() got an unexpected option {key!r}")
+            setattr(self, key, value)
+        self._validate()
+
+        sequences = self._as_sequences(data)
+        n_val = [int(round(self.val_frac * len(U))) for U in sequences]
+        train_raw = [U[: len(U) - n] for U, n in zip(sequences, n_val, strict=True)]
+        val_raw = [
+            U[len(U) - n - self.N_wash :]
+            for U, n in zip(sequences, n_val, strict=True)
+            if n > 0 and len(U) - n >= self.N_wash
+        ]
+        for index, U in enumerate(train_raw):
+            if len(U) < self.N_wash + self.seq_len + 1:
+                raise ValueError(
+                    f"segment {index} has {len(U)} training steps, fewer than "
+                    f"N_wash + seq_len + 1 = {self.N_wash + self.seq_len + 1}"
+                )
+
+        self.norm, self.shift = self._set_norm(train_raw, method=self.norm_method)
+        return [self.normalize_input(U) for U in train_raw], [self.normalize_input(U) for U in val_raw]
 
     def _adam_step(
         self,

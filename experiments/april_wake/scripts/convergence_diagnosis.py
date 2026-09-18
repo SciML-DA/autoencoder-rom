@@ -134,7 +134,7 @@ def fit_branch(Q, S, tr, te, lat, args, *, branch, epochs, lr, val_fraction, see
         cnn_channels=tuple(args.cnn_channels),
         latent_weight=args.latent_weight,
         learning_rate=lr,
-        n_epochs=epochs,
+        epochs=epochs,
         batch_size=args.batch,
         val_fraction=val_fraction,
         patience=args.patience,
@@ -632,8 +632,8 @@ def main() -> int:
         grid = unflat(Q[:, tr], dtype=np.float32)
         p_ae = AE(
             n_latent=args.r_field,
-            layer_dims=dims,
-            n_epochs=args.ae_epochs,
+            hidden=dims,
+            epochs=args.ae_epochs,
             batch_size=args.ae_batch,
             learning_rate=args.ae_lr,
             patience=args.ae_patience,

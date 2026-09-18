@@ -51,9 +51,9 @@ def grid():
 def _autoencoder(name):
     from models.data_driven import autoencoders
 
-    small = dict(n_latent=3, n_epochs=4, batch_size=16, seed=1)
+    small = dict(n_latent=3, epochs=4, batch_size=16, seed=1)
     arch = {
-        "AE": dict(layer_dims=(16,)),
+        "AE": dict(hidden=(16,)),
         "CAE": dict(channels=(4, 8)),
         "AEJax": dict(hidden=(16,)),
         "CAEJax": dict(channels=(4, 8)),
@@ -97,6 +97,43 @@ def test_lstm_round_trip_is_exact(tmp_path):
     assert path.name == config.to_hash()
 
 
+def test_lstm_jax_matches_numpy_and_round_trips(tmp_path):
+    """In float64, LSTMJax trains to the NumPy LSTM's parameters and restores exactly."""
+    import jax
+
+    from models.data_driven.forecasters import LSTMJax
+
+    jax.config.update("jax_enable_x64", True)
+    t = np.linspace(0, 40, 1200)
+    data = np.stack([np.sin(t), np.cos(1.3 * t), np.sin(0.7 * t) * np.cos(t)], axis=-1)
+    options: dict[str, Any] = dict(N_units=16, seed=1, epochs=3, seq_len=40, N_wash=20)
+    numpy_lstm = LSTM.from_data(data, **options)
+    jax_lstm = LSTMJax.from_data(data, dtype="float64", **options)
+
+    for name, value in numpy_lstm.p.items():
+        np.testing.assert_allclose(jax_lstm.p[name], value, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(jax_lstm.training_history.val, numpy_lstm.training_history.val, rtol=1e-10)
+    Y, state = numpy_lstm.openLoop(data[:100])
+    Y_jax, state_jax = jax_lstm.openLoop(data[:100])
+    np.testing.assert_allclose(Y_jax, Y, atol=1e-12)
+    F, _ = numpy_lstm.closedLoop(data[99], 200, state)
+    F_jax, _ = jax_lstm.closedLoop(data[99], 200, state_jax)
+    np.testing.assert_allclose(F_jax, F, atol=1e-10)
+
+    _, path = save_model_to_config(jax_lstm, save_dir=tmp_path)
+    restored = load_model_from_config(q=path.name, load_dir=tmp_path)
+    assert type(restored) is LSTMJax and restored.dtype == "float64"
+    np.testing.assert_array_equal(restored.openLoop(data[:100])[0], Y_jax)
+
+
+def test_lstm_jax_rejects_unknown_dtype():
+    """dtype must name float32 or float64."""
+    from models.data_driven.forecasters import LSTMJax
+
+    with pytest.raises(ValueError, match="dtype"):
+        LSTMJax(N_dim_in=2, N_units=4, dtype="float16")
+
+
 def test_auto_load_or_create_trains_once(grid, tmp_path, monkeypatch):
     """The second call with the same options loads instead of training."""
     cls, options = _autoencoder("AE")
@@ -118,7 +155,7 @@ def test_hash_depends_on_options_and_training_data():
     from models.data_driven.autoencoders import AE
 
     base = ModelConfig.from_init_params(AE, n_latent=3).to_hash()
-    assert ModelConfig.from_init_params(AE, n_latent=3, layer_dims=[512, 128]).to_hash() == base
+    assert ModelConfig.from_init_params(AE, n_latent=3, hidden=[512, 128]).to_hash() == base
     assert ModelConfig.from_init_params(AE, n_latent=4).to_hash() != base
     assert ModelConfig.from_init_params(AE, training_data_filename="other", n_latent=3).to_hash() != base
     assert ModelConfig.from_init_params(AE, n_latent=3, device="cuda").to_hash() == base
@@ -144,7 +181,7 @@ def test_function_activation_cannot_be_stored():
 
     from models.data_driven.autoencoders import AEJax
 
-    model = AEJax(n_latent=3, hidden=(16,), n_epochs=1, activation=jax.nn.tanh)
+    model = AEJax(n_latent=3, hidden=(16,), epochs=1, activation=jax.nn.tanh)
     with pytest.raises(ValueError, match="registered name"):
         model.config_options()
 
