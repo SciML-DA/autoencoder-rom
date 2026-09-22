@@ -30,6 +30,7 @@ dependencies = [
     # here as src/models/{model,history,integrator}.py and tools/esn_core.py.
     "dynamodels>=0.4.1,<1.0",
     "echostatenetwork[opt]>=0.1.2,<1.0",
+    "romda>=3.1,<4.0",
     "h5py>=3.14,<4.0",
     "matplotlib>=3.9,<4.0",
     "multiprocess>=0.70",

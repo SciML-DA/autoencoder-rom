@@ -192,7 +192,12 @@ RANDOM_SPACE = {
     # bottom raised from 1e-7: the screen found 0 through 1e-3 indistinguishable,
     # so the lowest decades only spend trials re-measuring "no decay". Top raised
     # to 3.0 for the reason in SCREEN above.
-    "weight_decay": ("log", 1e-6, 3.0),
+    # Top capped at 1e-3 after the analysis of the first random stage: above
+    # that, weight decay was ruinous for every branch, and half the sampled
+    # decades were spent confirming it -- which is also why it topped the
+    # importance ranking without helping anything. Changing this changes what
+    # stage_random draws, so a resumed random shard will not match its old rows.
+    "weight_decay": ("log", 1e-6, 1e-3),
     "sensor_noise": [0.0, 0.05, 0.1, 0.25, 0.5],
     "lr": ("log", 3e-4, 3e-2),
     "band_hz": [None, 20.0, 30.0, 40.0, 60.0],
@@ -523,6 +528,84 @@ def stage_random(seed=0, n=None):
     return out
 
 
+# Every configuration axis, taken from CENTRE so it cannot fall out of date.
+CONFIG_AXES = [k for k in CENTRE if k not in ("ensemble", "seed")]
+
+
+def config_from_row(r) -> dict:
+    """Rebuild a configuration from a results.csv row -- every axis of it.
+
+    Driven by CENTRE rather than a hand-kept list of names. The confirm stage
+    once copied dropout, weight_decay, sensor_noise and lr from the selected row
+    but not lambda_field, which that list predated, so every confirmation ran at
+    lambda_field=0.0: a different model from the one it had selected, and the
+    top configurations mostly used 0.1-1.0. Reading the axes off CENTRE means a
+    new axis is copied the moment it exists.
+    """
+    c = dict(CENTRE)
+    for k, default in CENTRE.items():
+        if k in ("ensemble", "seed") or k not in r:
+            continue
+        v = r[k]
+        if v in ("", "None", None):
+            c[k] = None if default is None else default
+        elif isinstance(default, tuple):
+            c[k] = tuple(int(x) for x in str(v).strip("()").split(",") if x.strip())
+        elif isinstance(default, bool):
+            c[k] = str(v) in ("1", "True", "true")
+        elif isinstance(default, int):
+            c[k] = int(float(v))
+        elif isinstance(default, float) or default is None:
+            c[k] = float(v)
+        else:
+            c[k] = str(v)
+    return c
+
+
+def archive_stale_confirm(path, cfgs, done) -> None:
+    """Move confirm rows that no longer match the selection out of results.csv.
+
+    Archived to results.confirm_stale.csv, never deleted. Rows whose
+    configuration is still selected stay put, so a confirm link killed at
+    walltime resumes instead of restarting from zero.
+    """
+    if not os.path.exists(path):
+        return
+    want = {key_of(c) for c in cfgs}
+    rows = list(csv.DictReader(open(path)))
+    # Stale: a confirm row no longer selected, or a verbatim repeat of one
+    # already kept -- the first confirm stage ran the centre config twice, and
+    # the repeat is a copy, not a second measurement.
+    seen, is_stale = set(), []
+    for r in rows:
+        k = key_of(r)
+        stale = r["stage"] == "confirm" and (k not in want or k in seen)
+        if r["stage"] == "confirm" and not stale:
+            seen.add(k)
+        is_stale.append(stale)
+    stale = [r for r, x in zip(rows, is_stale) if x]
+    if not stale:
+        return
+    arch = os.path.join(os.path.dirname(path), "results.confirm_stale.csv")
+    fresh = not os.path.exists(arch)
+    with open(arch, "a", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIELDS)
+        if fresh:
+            w.writeheader()
+        w.writerows({k: r.get(k) for k in FIELDS} for r in stale)
+    tmp = path + ".tmp"   # write-then-rename: a job killed here loses nothing
+    with open(tmp, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows({k: r.get(k) for k in FIELDS} for r, x in zip(rows, is_stale) if not x)
+    os.replace(tmp, path)
+    for r in stale:
+        k = key_of(r)
+        if k not in seen:   # an archived repeat shares its key with a kept row
+            done.discard(k)
+    print(f"  archived {len(stale)} stale confirm row(s) -> {os.path.basename(arch)}")
+
+
 def stage_confirm(out_dir):
     """Re-run the best-on-validation with more seeds, and touch the test block."""
     path = os.path.join(out_dir, "results.csv")
@@ -538,8 +621,19 @@ def stage_confirm(out_dir):
     # 20 Hz, 3 at 30 Hz, and nothing at fullband. Since confirm is the only
     # stage that touches the test block, that would have spent the single shot
     # on one band and left the headline fullband case with no test number.
-    per_band = collections.defaultdict(list)
+    # One candidate per configuration. The same configuration can sit in more
+    # than one stage -- the centre point is a row of both `screen` and `pair` --
+    # and without this the top-k per band spends its slots confirming it twice.
+    # Stage, trial and seed are bookkeeping, not configuration.
+    seen, uniq = set(), []
     for r in rows:
+        k = tuple(_keyfield(r.get(a)) for a in CONFIG_AXES)
+        if k not in seen:
+            seen.add(k)
+            uniq.append(r)
+
+    per_band = collections.defaultdict(list)
+    for r in uniq:
         per_band[r["band_hz"] if r["band_hz"] not in ("", "None") else None].append(r)
     picked = []
     for b in sorted(per_band, key=lambda k: (k is not None, k)):
@@ -551,24 +645,8 @@ def stage_confirm(out_dir):
 
     out = []
     for r in picked:
-        c = dict(CENTRE, axis="confirm")
-        for k in ("latent", "branch", "activation"):
-            c[k] = r[k]
-        for k in ("r_field", "n_delays", "kernel_size", "gru_hidden", "gru_layers"):
-            c[k] = int(float(r[k]))
-        for k in ("dropout", "weight_decay", "sensor_noise", "lr"):
-            c[k] = float(r[k])
-        c["band_hz"] = None if r["band_hz"] in ("", "None") else float(r["band_hz"])
-        for k in ("hidden", "cnn_channels"):
-            c[k] = tuple(int(x) for x in r[k].strip("()").rstrip(",").split(",") if x)
-        # One row per seed, not one ensemble-averaged row. Two reasons, both
-        # from the protocol: the spread across seeds is the yardstick for
-        # significance, and an ensemble mean has no spread -- it collapses to a
-        # single number exactly where the winner is being chosen. And averaging
-        # five predictions lowers NMSE by itself, so an ensembled confirm score
-        # is not comparable to the single-model random-stage score it is meant
-        # to confirm; the configuration would appear to improve on confirmation
-        # for reasons that have nothing to do with the configuration.
+        c = config_from_row(r)
+        c["axis"] = "confirm"
         c["ensemble"] = 1
         for s in range(CONFIRM_SEEDS):
             out.append(dict(c, seed=s))
@@ -663,6 +741,8 @@ def main() -> int:
             cfgs = STAGES[st]()
         for c in cfgs:
             c["stage"] = st
+        if st == "confirm":
+            archive_stale_confirm(path, cfgs, done)
         # band first so the rebuild above happens once per level rather than
         # once per trial; smallest-model-first within a level, so `tail -f`
         # half way through a level is still informative

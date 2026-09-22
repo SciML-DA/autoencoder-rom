@@ -98,6 +98,73 @@ def rule(msg):
     print("\n" + "=" * 78 + f"\n{msg}\n" + "=" * 78, flush=True)
 
 
+def confirm_best(path, out_dir, Q, S, tr, va, te, band, args) -> int:
+    """Refit the best-on-validation configuration once and score the test block.
+
+    The sweep deliberately never touches the test block, so without this the
+    only comparison against the network search's confirm stage is network TEST
+    against PODLSE VALIDATION -- which flatters PODLSE by the whole val-to-test
+    gap (about +0.03 for the networks). One fit per band is enough: PODLSE has
+    no stochastic training, and the randomized POD is seeded.
+
+    It also re-scores validation and compares it with the stored value. If they
+    disagree, the data or the code changed since the sweep ran, and the test
+    number would belong to a different model from the one that was selected --
+    the failure the network confirm stage had. The row records both, so the
+    analysis can refuse to use it.
+    """
+    rows = [r for r in csv.DictReader(open(path)) if r["nmse_val"] not in ("", "nan")]
+    if not rows:
+        print(f"  nothing to confirm: no scored rows in {path}")
+        return 1
+    best = min(rows, key=lambda r: float(r["nmse_val"]))
+    rs = best["r_sensor"]
+    c = dict(
+        band_hz=band,
+        n_delays=int(float(best["n_delays"])),
+        r_field=int(float(best["r_field"])),
+        r_sensor=None if rs in ("", "None") else int(float(rs)),
+        ridge=float(best["ridge"]),
+        sensor_basis=best["sensor_basis"],
+        rank_bound=int(float(best["rank_bound"])),
+    )
+    rule(f"confirm: band {band if band else 'fullband'}, best of {len(rows)} on validation")
+    t1 = time.time()
+    Sd = delay_embed(S, c["n_delays"], args.delay_stride, args.delay_ahead)
+    m = PODLSE(
+        r_field=c["r_field"],
+        r_sensor=c["r_sensor"],
+        sensor_basis=c["sensor_basis"],
+        ridge=c["ridge"],
+        pod_method="randomized",
+    ).fit(Q[:, tr], Sd[:, tr])
+    val = nmse(Q[:, va], m.predict(Sd[:, va]))
+    test = nmse(Q[:, te], m.predict(Sd[:, te]))
+    stored = float(best["nmse_val"])
+    # thread count changes BLAS summation order, so demand closeness, not identity
+    same = abs(val - stored) < 1e-4
+
+    row = dict(c, nmse_val=val, nmse_test=test, seconds=time.time() - t1,
+               val_stored=stored, val_reproduced=int(same))
+    out = os.path.join(out_dir, "results.confirm.csv")
+    fields = FIELDS + ["val_stored", "val_reproduced"]
+    with open(out, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        w.writerow({k: row.get(k) for k in fields})
+
+    print(f"  config : L={c['n_delays']} r_f={c['r_field']} r_s={c['r_sensor']} "
+          f"ridge={c['ridge']:g} {c['sensor_basis']}")
+    print(f"  val    : {val:.4f}   (stored {stored:.4f}, "
+          f"{'reproduced' if same else 'DOES NOT REPRODUCE'})")
+    print(f"  test   : {test:.4f}   optimism {test - val:+.4f}")
+    if not same:
+        print("  !! validation does not match the sweep, so this test score is not")
+        print("     for the selected model. Check what changed before quoting it.")
+    print(f"  wrote {out}")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_data_args(p)
@@ -108,6 +175,9 @@ def main() -> int:
     p.add_argument("--max-hours", type=float, default=3.5)
     p.add_argument("--limit", type=int, default=0, help="cap fits, for testing")
     p.add_argument("--with-test", action="store_true", help="also score the test block -- once, at the end, only")
+    p.add_argument("--confirm", action="store_true",
+                   help="skip the sweep: refit the best-on-validation config from "
+                        "results.csv and score the test block, once")
     args = p.parse_args()
 
     out_dir = os.path.join(args.out, args.tag)
@@ -130,6 +200,8 @@ def main() -> int:
         band = None
     tr, va, te = three_way(args, Q, run_id, cases)
     print(f"  train {len(tr)}  val {len(va)}  test {len(te)}   sensors {S.shape[0]}")
+    if args.confirm:
+        return confirm_best(path, out_dir, Q, S, tr, va, te, band, args)
 
     done = set()
     if os.path.exists(path):
