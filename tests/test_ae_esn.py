@@ -345,29 +345,35 @@ def test_observables_read_the_decoded_field_at_the_sensors(data, name):
 
 
 @slow
-@pytest.mark.parametrize(
-    "name",
-    [
-        pytest.param(
-            "POD_ESN",
-            marks=pytest.mark.xfail(
-                raises=AttributeError,
-                strict=True,
-                reason="dynamodels Model.reset_model re-runs Model.__init__, which cannot reassign alpha0",
-            ),
-        ),
-        "POD_LSTM",
-    ],
-)
+@pytest.mark.parametrize("name", ["POD_ESN", "POD_LSTM"])
 def test_reset_case_resets_the_forecaster(data, name):
     """reset_case(reset_forecaster=True) restarts from the first training snapshot."""
     import models.data_driven as dd
 
-    kw = (dict(N_func_evals=4, N_grid=2) if name == "POD_ESN" else dict(forecaster_epochs=2, seq_len=50))
+    kw = (dict(N_func_evals=4, N_grid=2, plot_training=False) if name == "POD_ESN"
+          else dict(forecaster_epochs=2, seq_len=50))
     m = getattr(dd, name)(data=data, dt=0.01, n_modes=6, method="exact", random_state=0, grid_shape=GRID,
                           domain=DOMAIN, Nq=8, seed=0, N_units=16, N_wash=5, **kw)
     p, t = m.time_integrate(Nt=5)
     m.update_history(p, t)
     m.reset_case(reset_forecaster=True)
+    assert m.hist.shape[0] == 1
+    np.testing.assert_allclose(m.get_latent_coefficients()[:, 0], m.latent_training_trajectory[:, 0])
     assert np.isfinite(m.get_observable_hist()).all()
+    p, _ = m.time_integrate(Nt=5)
+    assert np.isfinite(p).all()
+    m.close()
+
+
+@slow
+@pytest.mark.parametrize("name", ["POD_ESN", "POD_LSTM"])
+def test_state_labels_name_every_state_row(data, name):
+    """state_labels has one label per row of the state vector."""
+    import models.data_driven as dd
+
+    kw = (dict(N_func_evals=4, N_grid=2, plot_training=False) if name == "POD_ESN"
+          else dict(forecaster_epochs=2, seq_len=50))
+    m = getattr(dd, name)(data=data, dt=0.01, n_modes=6, method="exact", random_state=0, grid_shape=GRID,
+                          domain=DOMAIN, Nq=8, seed=0, N_units=16, N_wash=5, **kw)
+    assert len(m.state_labels) == m.Nphi
     m.close()

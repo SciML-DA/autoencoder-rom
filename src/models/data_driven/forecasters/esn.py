@@ -670,7 +670,51 @@ class ESN_model(EchoStateNetwork, Model):
         kwargs["psi0"] = self.build_psi()
         self.reset_model(**kwargs)
 
+    def reset_forecaster(self, data=None, u0=None, r0=None, **kwargs):
+        """Restart the model from `u0`, keeping the trained network.
+
+        Unlike `reset_ESN`, nothing is retrained. History is replaced by a
+        single state at the current time, which is what `LatentROM.reset_case`
+        expects of every forecaster (see `LSTM_model.reset_forecaster`).
+
+        Parameters
+        ----------
+        data : np.ndarray, optional
+            Ignored; accepted for the `LatentROM.reset_case` call signature.
+        u0 : np.ndarray, optional
+            Initial physical state, ``N_dim`` values or shape ``(N_dim, m)``.
+            Defaults to the current physical state.
+        r0 : np.ndarray, optional
+            Initial reservoir state, shape ``(N_units, m)``. Defaults to zeros,
+            the state training starts from, so the first ~`N_wash` closed-loop
+            steps are a transient. Use `initialize_from_val_data` for an
+            on-attractor start instead.
+        **kwargs
+            Ignored.
+
+        Returns
+        -------
+        None
+            Resets the history in place.
+        """
+        del data, kwargs
+        if u0 is None:
+            u = self.unbuild_psi(self.current_state)[0]
+        else:
+            u = np.asarray(u0, dtype=float).reshape(self.N_dim, -1)
+        r = np.zeros((self.N_units, u.shape[1])) if r0 is None else np.asarray(r0, dtype=float)
+        psi = self.build_psi(u=u, r=r)
+        self.update_history(psi[np.newaxis], t=np.array([self.current_time]), reset=True)
+
     # ______________________ Changed Model class attributes ______________________ #
+
+    @property
+    def forecaster_state_labels(self):
+        r"""list of str: LaTeX labels for the reservoir units, $r_1, \dots, r_{N_\mathrm{units}}$,
+        or none when `update_reservoir` is False (they are then not part of the state)."""
+        if not self.update_reservoir:
+            return []
+        return [f"$r_{{{j + 1}}}$" for j in np.arange(self.N_units)]
 
     @property
     def state_labels(self):
