@@ -151,6 +151,7 @@ dependencies = [
     { name = "pyqt5" },
     { name = "pyts" },
     { name = "requests" },
+    { name = "romda" },
     { name = "scikit-optimize" },
     { name = "scipy" },
     { name = "seaborn" },
@@ -194,6 +195,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4" },
     { name = "pyts", specifier = ">=0.13" },
     { name = "requests", specifier = ">=2.32" },
+    { name = "romda", specifier = ">=3.1,<4.0" },
     { name = "scikit-optimize", specifier = ">=0.10" },
     { name = "scipy", specifier = ">=1.13,<2.0" },
     { name = "scipy-stubs", marker = "extra == 'dev'", specifier = ">=1.18" },
@@ -2841,6 +2843,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/2c/06/37c1a5557acf449e8e406a830a05bf885ac47d33270aec454ef78675008d/rfc3987_syntax-1.1.0.tar.gz", hash = "sha256:717a62cbf33cffdd16dfa3a497d81ce48a660ea691b1ddd7be710c22f00b4a0d", size = 14239, upload-time = "2025-07-18T01:05:05.015Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/71/44ce230e1b7fadd372515a97e32a83011f906ddded8d03e3c6aafbdedbb7/rfc3987_syntax-1.1.0-py3-none-any.whl", hash = "sha256:6c3d97604e4c5ce9f714898e05401a0445a641cfa276432b0a648c80856f6a3f", size = 8046, upload-time = "2025-07-18T01:05:03.843Z" },
+]
+
+[[package]]
+name = "romda"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dynamodels" },
+    { name = "echostatenetwork", extra = ["opt"] },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "pyts" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "scipy" },
+    { name = "tqdm" },
+    { name = "typeguard" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/19/0b0cc1f594cde919523cdddf1689894cc3ca702d3cb52942aa4d580de9c3/romda-3.1.0.tar.gz", hash = "sha256:c12d5ee668be372a5350f5116cf51d826bb5a7f46108392197ae6f955042fffc", size = 140218, upload-time = "2026-09-19T09:52:32.355Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/3a/069cb8ecb02110f10fdd619584b898f17a69ebf40b47fb155b8800ad45c4/romda-3.1.0-py3-none-any.whl", hash = "sha256:d2eda56994ab377337321a160c65a81a91bac45fbf31d4ea6d094cb74cd4096f", size = 145333, upload-time = "2026-09-19T09:52:30.752Z" },
 ]
 
 [[package]]
